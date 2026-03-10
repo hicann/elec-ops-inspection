@@ -1,0 +1,65 @@
+[
+    {
+        "op": "Unique_V3",
+        "input_desc": [
+            {
+                "name": "input",
+                "param_type": "required",
+                "format": [
+                    "ND","ND","ND","ND","ND","ND"
+                ],
+                "type": [
+                    "bfloat16","float16","int16","float","int32","int64"
+                ]
+            }
+        ],
+        "attr":[
+            {
+                "name": "flag_inverse",
+                "param_type": "optional",
+                "type": "bool",
+                "default": "false"
+            },
+            {
+                "name": "flag_counts",
+                "param_type": "optional",
+                "type": "bool",
+                "default": "false"
+            }
+        ],
+        "output_desc": [
+            {
+                "name": "output",
+                "param_type": "required",
+                "format": [
+                    "ND","ND","ND","ND","ND","ND"
+                ],
+                "type": [
+                    "bfloat16","float16","int16","float","int32","int64"
+                ]
+            },
+            {
+                "name": "uniqueCnt",
+                "param_type": "required",
+                "format": [
+                    "ND","ND","ND","ND","ND","ND"
+                ],
+                "type": [
+                    "int32","int32","int32","int32","int32","int32"
+                ]
+            },
+            {
+                "name": "inverse",
+                "param_type": "optional",
+                "format": ["ND","ND","ND","ND","ND","ND"],
+                "type": ["int32","int32","int32","int32","int32","int32"]
+            },
+            {
+                "name": "counts",
+                "param_type": "optional",
+                "format": ["ND","ND","ND","ND","ND","ND"],
+                "type": ["int32","int32","int32","int32","int32","int32"]
+            }
+        ]
+    }
+]
