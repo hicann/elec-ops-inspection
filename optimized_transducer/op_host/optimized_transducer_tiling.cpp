@@ -1,25 +1,16 @@
-/**
- * Copyright (c) 2025 Huawei Technologies Co., Ltd.
- * This program is free software, you can redistribute it and/or modify it under the terms and conditions of 
- * CANN Open Software License Agreement Version 2.0 (the "License").
- * Please refer to the License for details. You may not use this file except in compliance with the License.
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED, 
- * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
- * See LICENSE in the root of the software repository for the full text of the License.
- */
-
-/*!
- * \file optimized_transducer_tiling.cpp
- * \brief
- */
-
-#include "log/log.h"
-#include "util/math_util.h"
-#include "tiling_base/tiling_util.h"
-#include "tiling_base/tiling_templates_registry.h"
-#include "op_common/op_host/util/platform_util.h"
-#include "optimized_transducer/op_kernel/optimized_transducer_tiling_data.h"
-#include "optimized_transducer/op_kernel/optimized_transducer_tiling_key.h"
+// Copyright 2026 Electrical Engineering SIG - CANN Community
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 namespace optiling {
 
