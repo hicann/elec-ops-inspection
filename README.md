@@ -1,5 +1,4 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/CANN-OpenSoftware%202.0-blue" />
   <img src="https://img.shields.io/badge/Electrical%20Engineering%20SIG-CANN%20Community-orange" />
   <img src="https://img.shields.io/badge/license-Apache%202.0-green" />
   <img src="https://img.shields.io/badge/status-active-brightgreen" />
@@ -19,16 +18,14 @@
 
 **② 具身智能巡检**：面向机器狗、无人机等具身智能形态的"地空协同"移动巡检场景，提供面向大规模空间尺度建模（3DGS）的昇腾专用算子，支撑换流站等大型设施的空间感知与智能巡检。
 
-
-
+---
 
 ## 核心算子列表
 
 | 算子名称                    | 场景     | 描述               | 状态     |
 | ----------------------- | ------ | ---------------- | ------ |
-| `optimized_transducer`             | 语音识别 | 对`RNN-T`模型的`loss`算子和`softmax`算子做了融合，显存优化和性能优化 | ✅ 已发布  |
+| `optimized_transducer` | 语音识别 | 对`RNN-T`模型的`loss`算子和`softmax`算子做了融合，显存优化和性能优化 | ✅ 已发布  |
 | `unique_v3` | 数学通用算子  | 对排序算法在AIV上做了优化，增加`index` `counter`输出   | ✅ 已发布 |
-
 
 ---
 
@@ -72,4 +69,4 @@
 
 ## 📄 许可证
 
-本项目基于 [Apache License 2.0]() 开源，基于 **CANN OpenSoftware 2.0**。
+本项目基于 [Apache License 2.0]() 开源。
