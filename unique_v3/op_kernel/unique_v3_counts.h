@@ -1,21 +1,9 @@
-// Copyright 2026 Electrical Engineering SIG - CANN Community
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
+#include "kernel_operator.h"
+#include "stdio.h"
 using namespace AscendC;
 
 
-namespace AscendC 
+namespace NsUniqueV3
 {
 
 template<typename T>
@@ -24,54 +12,40 @@ __aicore__ inline bool KernelUnique<T>::TileCalculateCounts(const LocalTensor<fl
     const uint16_t elemLength, uint64_t& arrayLen, int32_t& beforeNumCnt, float& beforeNumValue)
 {
     bool isSame = false;
-    //这里把bitMask内存再分一下，前半部分用来存左移掩码，后半部分用来存末次出现下标掩码
     LocalTensor<uint32_t> bitMask_idx =  bitMask32[TILE_LENGTH / 2].ReinterpretCast<uint32_t>();
     uint64_t rsvdCnt = 0;
-    // 从srcLocal中取出Val值  srcLocal中分布为 idx1-val1 | idx2-val2 | idx3-val3 | ...
     GatherMask(dstVal, srcLocal, 1, false, 0, {1, static_cast<uint16_t>((elemLength * 2 + 63) / 64), 8, 0}, rsvdCnt);
-    PipeBarrier<PIPE_V>();    
+    PipeBarrier<PIPE_V>();
     isSame = dstVal.GetValue(0) == beforeNumValue;
-    // 构造0111111左移掩码
     Duplicate(bitMask32, (uint32_t)0b11111111111111111111111111111111, (elemLength + 31) / 32);
     PipeBarrier<PIPE_V>();
     bitMask32.SetValue(0, 0b11111111111111111111111111111110);
-    // 把val数组通过bitmask整体左移一位（通过Gather）然后尾部补 -FLOAT_INF
     GatherMask(shiftedLocal, dstVal, bitMask32, true, elemLength, {1, 1, 0, 0}, rsvdCnt);
     PipeBarrier<PIPE_V>();
     shiftedLocal.SetValue(elemLength - 1, -FLOAT_INF);
-    // 将dstVal的错位数组shiftedLocal与原dstVal相减，得到末次出现下标掩码
     LocalTensor<uint8_t> bitMask8 = bitMask_idx.ReinterpretCast<uint8_t>();
     Compare(bitMask8, dstVal, shiftedLocal, CMPMODE::NE, (elemLength + 63) / 64 * 64);
     PipeBarrier<PIPE_V>();
-    // srcLocal可以继续复用，将indicesLocal数组[0,1,2,3,4...]存在前半部分
     LocalTensor<int32_t> indicesLocal = srcLocal.ReinterpretCast<int32_t>();
     ArithProgression(indicesLocal, (int32_t)0, (int32_t)1, elemLength);
     PipeBarrier<PIPE_V>();
-    // 对indicesLocal数组用bitMask_idx数组再做一次gateMask，得到下标数组，放在srcLocal后半段
     LocalTensor<int32_t> idxArray1 = srcLocal[TILE_LENGTH].ReinterpretCast<int32_t>();
     LocalTensor<int32_t> idxArray2 = srcLocal.ReinterpretCast<int32_t>();
     GatherMask(idxArray1, indicesLocal, bitMask_idx, true, elemLength, {1, 1, 0, 0}, arrayLen);
     PipeBarrier<PIPE_V>();
-    // 更新beforeNumValue
     beforeNumValue = dstVal.GetValue(idxArray1.GetValue(arrayLen - 1));
-    // 把下标数组用bitmask再做一次整体左移，放在srcLocal前半段
     GatherMask(idxArray2, idxArray1, bitMask32, true, elemLength, {1, 1, 0, 0}, rsvdCnt);
     PipeBarrier<PIPE_V>();
-    // 两者做一次sub，得到count数组，放在dstVal里
-    // （为什么做arrayLen-1次是因为这里算的是2~arrayLen的，第1位其实还没算出来，所以dst前面要留32字节放第1位）
     LocalTensor<int32_t> countArray = dstVal[8].ReinterpretCast<int32_t>();
     LocalTensor<int32_t> dstValAsInt = dstVal.ReinterpretCast<int32_t>();
     Sub(countArray, idxArray2, idxArray1,  arrayLen - 1);
     PipeBarrier<PIPE_V>();
-    // 第一个数的count需要单独算
-    dstValAsInt.SetValue(7, idxArray1.GetValue(0) + 1 + (isSame ? beforeNumCnt : 0)); 
-    // 再重新构造一个右移掩码，然后把数据往srcLocal上一拷贝，把srcLocal当最后结果就行了
+    dstValAsInt.SetValue(7, idxArray1.GetValue(0) + 1 + (isSame ? beforeNumCnt : 0));
     Duplicate(bitMask32, (uint32_t)0b11111111111111111111111111111111, (elemLength + 31) / 32 + 1);
     PipeBarrier<PIPE_V>();
     bitMask32.SetValue(0, 0b11111111111111111111111110000000);
     GatherMask(idxArray2, dstValAsInt, bitMask32, true, arrayLen + 8, {1, 1, 0, 0}, rsvdCnt);
     PipeBarrier<PIPE_V>();
-    // 更新beforeNumCnt值
     beforeNumCnt = idxArray2.GetValue(arrayLen - 1);
     return isSame;
 }
@@ -83,6 +57,7 @@ __aicore__ inline void KernelUnique<T>::CalculateCounts()
     float beforeNumValue = -FLOAT_INF;
     float first = 0.0f, last = 0.0f;
     uint32_t offset = GetGlobalOffset(GetBlockIdx());
+
     for (int32_t tileIdx = 0; tileIdx < this->tileNum; tileIdx++) {
         int32_t progress = tileIdx;
         LocalTensor<uint32_t> bitMask32 = calcBuf[0].Get<uint32_t>();
@@ -91,7 +66,10 @@ __aicore__ inline void KernelUnique<T>::CalculateCounts()
         LocalTensor<float> sortedLocal2 = calcBuf[2].Get<float>();
         LocalTensor<uint32_t> uniqueCntLocal = shiftedLocal.ReinterpretCast<uint32_t>();
         uint64_t arrayLen;
-        DataCopy(sortedLocal1, sortedBlock1[progress * TILE_LEN_ELEM], TILE_LEN_ELEM);
+        
+        // DataCopy(sortedLocal1, sortedBlock1[progress * TILE_LEN_ELEM], TILE_LEN_ELEM);
+        AscendC::DataCopyPad(sortedLocal1, sortedBlock1[progress * TILE_LEN_ELEM], 
+            {1, static_cast<uint32_t>(TILE_LEN_ELEM * sizeof(float)), 0, 0, 0}, {false, 0, 0, 0});
         PipeBarrier<PIPE_ALL>();
         if(tileIdx == 0) { 
             first = sortedLocal1.GetValue(0);
@@ -106,8 +84,6 @@ __aicore__ inline void KernelUnique<T>::CalculateCounts()
             {1, static_cast<uint16_t>(sizeof(uint32_t) * arrayLen), 0, 0});
         PipeBarrier<PIPE_ALL>();
         offset += arrayLen - (shifted ? 1 : 0);
-        // printf("le me see see tile %d arrayLen %d beforeNumCnt %d beforeNumValue %f shifted %d offset %d\n", 
-        //     tileIdx, arrayLen, beforeNumCnt, beforeNumValue, shifted, offset);
     }
     last = beforeNumValue;
     LocalTensor<float> tmpLocal = calcBuf[1].Get<float>();
@@ -130,7 +106,6 @@ __aicore__ inline void KernelUnique<T>::CopyOutCounts()
     LocalTensor<float> tmpLocal = calcBuf[1].Get<float>();
     DataCopyPad(tmpLocal, counterMsg, {1, static_cast<uint16_t>(sizeof(float) * 3 * blockNum), 0, 0}, {false, 0, 0, 0});
     PipeBarrier<PIPE_ALL>();
-
     //offset及累加值计算
     for(int32_t i = 0; i <= GetBlockIdx(); i++){
         float firstNext = tmpLocal.GetValue(i * 3);
@@ -140,7 +115,7 @@ __aicore__ inline void KernelUnique<T>::CopyOutCounts()
             firstNumCntAdd = 0;
         }else{
             offset += countLen - 1;
-            firstNumCntAdd = counterGlobal.GetValue(GetGlobalOffset(i - 1) + countLen - 1) 
+            firstNumCntAdd = counterGlobal.GetValue(GetGlobalOffset(i - 1) + countLen - 1)
                 + (countLen == 1 ? firstNumCntAdd : 0);
         }
         countLen = tmpLocal.ReinterpretCast<uint32_t>().GetValue(i * 3 + 2);
@@ -152,11 +127,12 @@ __aicore__ inline void KernelUnique<T>::CopyOutCounts()
     bool skipLast = false;
     if(GetBlockIdx() != blockNum - 1){
         float firstNext = counterMsg.GetValue((GetBlockIdx() + 1) * 3);
-        skipLast = first == firstNext;
+        skipLast = last == firstNext;
     }
     // 极端情况（block长度为1又被后面覆盖）不用写直接返回
     if(countLen == 1 && skipLast) return;
     // 拷贝workspace数据到counts里
+    int32_t firstCounter = counterGlobal.GetValue(GetGlobalOffset(GetBlockIdx())) + firstNumCntAdd; 
     DataCopyGM2GM(
         counterResult[offset],
         counterGlobal[GetGlobalOffset(GetBlockIdx())],
@@ -165,9 +141,10 @@ __aicore__ inline void KernelUnique<T>::CopyOutCounts()
         (countLen - (skipLast ? 1 : 0)) * sizeof(int32_t));
     // 最后把累加值加到头上
     LocalTensor<int32_t> tmp = calcBuf[1].Get<int32_t>();
-    tmp.SetValue(0, counterGlobal.GetValue(GetGlobalOffset(GetBlockIdx())) + firstNumCntAdd);
+    tmp.SetValue(0, firstCounter);
+    SyncDiffPipe<AscendC::HardEvent::S_MTE3>();
     DataCopyPad(counterResult[offset], tmp, {1, static_cast<uint16_t>(sizeof(uint32_t)), 0, 0, 0});
     PipeBarrier<PIPE_ALL>();
 }
 
-} // namespace AscendC
+} // namespace NsUniqueV3

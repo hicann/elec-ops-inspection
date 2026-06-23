@@ -1,482 +1,413 @@
-// Copyright 2026 Electrical Engineering SIG - CANN Community
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+
+
+#ifndef __UNIQUE_V3_H__
+#define __UNIQUE_V3_H__
+
+#include "kernel_operator.h"
+#include "kernel_tiling/kernel_tiling.h"
+#include "unique_v3_tiling_data.h"
+#include "unique_v3_tiling_key.h"
+#include "unique_v3_commons.h"
+
+
+namespace NsUniqueV3 {
 
 using namespace AscendC;
 
 
-namespace AscendC {
-template<typename Ta, typename Tb>
-__aicore__ inline Ta min(const Ta a, const Tb b)
-{
-    if (a > b) {
-        return b;
-    }
-    return a;
-}
-
-template<typename Ta, typename Tb>
-__aicore__ inline Ta max(const Ta a, const Tb b)
-{
-    if (a < b) {
-        return b;
-    }
-    return a;
-}
 
 template<typename T>
 class KernelUnique {
 public:
     __aicore__ inline KernelUnique(TPipe& pipe) : pipe(pipe) {}
-    // Each block process diffent part of data. This function returns the element-wise first index of data by blockIdx.
-    __aicore__ inline size_t GetGlobalOffset(const uint32_t blockIdx);
     __aicore__ inline void Init(
-        GM_ADDR input, GM_ADDR output, GM_ADDR uniqueCnt, 
+        GM_ADDR input, GM_ADDR output, GM_ADDR uniqueCnt,
         GM_ADDR inverse, GM_ADDR counts, GM_ADDR workspace,
         const uint32_t totalLength, const uint32_t shortBlockTileNum, const uint16_t tileLength,
         const uint16_t tailLength, const uint8_t aivNum, const uint8_t blockNum, const uint8_t shortBlockNum,
-        const bool flagInverse, const bool flagCounts);
+        const bool flagSorted, const bool flagInverse, const bool flagCounts);
     __aicore__ inline void Process();
+    __aicore__ inline size_t GetGlobalOffset(const uint32_t blockIdx);
+
 
 private:
-    __aicore__ inline void CopyIn(const int32_t progress);
-    __aicore__ inline void Elem32Sort(const int32_t progress);
-    __aicore__ inline void TileSort(const int32_t progress);
-    template<typename T1>
-    __aicore__ inline static void DataCopyGM2GM(const GlobalTensor<T1>& dst, const GlobalTensor<T1>& src,
-        const LocalTensor<T1>& tmpLocal, const int elemLength, const int bufByteLength);
+
     using GMSSrcList = GlobalTensor<float> (&)[4];
     struct GMSParams {
         int (&GMSLengths)[4];
         uint8_t& queNum;
         LocalTensor<float> (&&buffLocal)[5];
     };
-    __aicore__ inline static void MrgSortGM(GlobalTensor<float>&& dstGlobal, GMSSrcList& srcList, GMSParams& params);
-    __aicore__ inline void BlockSortV2();
-    __aicore__ inline void GlobalSortV2();
 
+    __aicore__ inline void SortTile();
+    __aicore__ inline bool MrgTile(const LocalTensor<float>& sortArray,
+                                   const LocalTensor<float>& tmpArray,
+                                   int32_t tileLen);
+    __aicore__ inline void MrgSortGM(GlobalTensor<float>&& dstGlobal, 
+                                    GMSSrcList& srcList, 
+                                    GMSParams& params);                                   
+    __aicore__ inline void MrgBlock();
+    __aicore__ inline void MrgGlobal();
+
+    __aicore__ inline void CalculateFlip();
+    __aicore__ inline void CalculateUnique();
     __aicore__ inline void CalculateInverse();
     __aicore__ inline void CalculateCounts();
+
     
 
     __aicore__ inline void CopyOriginalArrayIdx2GM(
-        const LocalTensor<float> &ArrayLocal, const LocalTensor<float> &idxLocal, 
-        const LocalTensor<uint32_t> &tmpLocal, int32_t progress);    
-    __aicore__ inline void TileCumulativeSum(const LocalTensor<float> &sortedLocal1, 
-        const LocalTensor<float> &sortedLocal2, const LocalTensor<uint32_t>& tmpLocal, 
+        const LocalTensor<float> &ArrayLocal, const LocalTensor<float> &idxLocal,
+        const LocalTensor<uint32_t> &tmpLocal, int32_t progress);
+    __aicore__ inline void TileCumulativeSum(const LocalTensor<float> &sortedLocal1,
+        const LocalTensor<float> &sortedLocal2, const LocalTensor<uint32_t>& tmpLocal,
         int32_t progress, int32_t &unique_num, float &firstValue, float &endValue);
     __aicore__ inline void BlockCumulativeSum();
-    
+
     __aicore__ inline static bool TileCalculateCounts(const LocalTensor<float>& dstVal,
-        const LocalTensor<float>& srcLocal, const LocalTensor<float>& shiftedLocal, 
-        const LocalTensor<uint32_t>& bitMask32, const uint16_t elemLength, 
-        uint64_t& arrayLen,int32_t& beforeNumCnt, float& beforeNumValue);        
+        const LocalTensor<float>& srcLocal, const LocalTensor<float>& shiftedLocal,
+        const LocalTensor<uint32_t>& bitMask32, const uint16_t elemLength,
+        uint64_t& arrayLen,int32_t& beforeNumCnt, float& beforeNumValue);
     __aicore__ inline static void ConsecutiveUnique(const LocalTensor<float>& dstVal,
         const LocalTensor<float>& srcLocal, const LocalTensor<float>& shiftedLocal,
         const LocalTensor<uint32_t>& bitMask16, const uint16_t elemLength, uint64_t& tileUniqueCnt);
     __aicore__ inline void TileUnique(const int32_t progress);
+
+    __aicore__ inline void CopyOutUnique();
     __aicore__ inline void CopyOutCounts();
     __aicore__ inline void CopyOutInverse();
     __aicore__ inline void CopyOut();
 
+
+
+
+
+
 private:
     static constexpr int32_t TILE_LENGTH = 8192;
     // INF to fill the tail blank, so that tail is automatically removed by Compare in Unique.
-    static constexpr float FLOAT_INF = 3e+99;
+    static constexpr float FLOAT_INF = 3.402823e+38f;
     // Indicates the factor converting float to data structure used by Sort32&MrgSort.
     static constexpr int16_t SORT_DATATYPE_SIZE = sizeof(float) + sizeof(uint32_t);          // 8
     static constexpr int16_t SORT_DATATYPE_SIZE_FACTOR = SORT_DATATYPE_SIZE / sizeof(float); // 2
     static constexpr int32_t TILE_LEN_BYTE = TILE_LENGTH * SORT_DATATYPE_SIZE;               // 8192 * 8 = 65536
     static constexpr int32_t TILE_LEN_ELEM = TILE_LENGTH * SORT_DATATYPE_SIZE_FACTOR;        // 8192 * 2 = 16384
-    static constexpr uint16_t VALID_QUE[5] = {
-        0, 0, 0b11, 0b111, 0b1111}; // Converts queue number to validBit of MrgSort.
+    // Max elements per way for MrgSort, limited by UB output buffer (8192 elements total)
+    // 4-way: 8192/4=2048, but cap at 2047 to keep total bytes < 65535 for DataCopyPad
+    // 3-way: 8190/3=2730, 2-way: min(4095, 8190/2)=4095
+    static constexpr int32_t BUFFER_LEN[5] = {0, 0, 4095, 2730, 2048};
+    static constexpr uint16_t VALID_QUE[5] = {0, 0, 0b11, 0b111, 0b1111};
 
-    TPipe& pipe;
-    TBuf<TPosition::VECIN> calcBuf[3];
+    AscendC::TPipe& pipe;
+    TBuf<TPosition::VECCALC> calcBuf[3];
 
     GlobalTensor<T> srcGlobal;
-    GlobalTensor<uint32_t> srcGlobalAsUint;
-    GlobalTensor<T> dstGlobal1;
-    GlobalTensor<int32_t> dstGlobal1As32;
+    GlobalTensor<T> srcBlock;
+    GlobalTensor<T> dstGlobal;
     GlobalTensor<int32_t> uniqueCntGlobal;
+    GlobalTensor<int32_t> counterResult;
+    GlobalTensor<int32_t> inverseResult;
+    GlobalTensor<int32_t> inverseResultBlock;
 
-    GlobalTensor<float> sortedBlock1;
-    GlobalTensor<int32_t> sortedBlock1AsInt;
-    GlobalTensor<float> sortedBlock2;
-    GlobalTensor<int32_t> sortedBlock2AsInt;
     GlobalTensor<float> sortedGlobal1;
     GlobalTensor<float> sortedGlobal2;
+    GlobalTensor<float> sortedBlock1;
+    GlobalTensor<float> sortedBlock2;
+    GlobalTensor<int32_t> sortedBlock1AsInt32;
+    GlobalTensor<int32_t> sortedBlock2AsInt32; 
 
     GlobalTensor<int32_t> IBSyncGlobal;
-    GlobalTensor<uint32_t> blockUniqueCntGlobal;
+    GlobalTensor<float> uniqueMsg;
 
-    GlobalTensor<int32_t> counterResult;
     GlobalTensor<int32_t> counterGlobal;
     GlobalTensor<float> counterMsg;
-
     GlobalTensor<int32_t> inverseGlobal1;
     GlobalTensor<int32_t> inverseGlobal2;
     GlobalTensor<int32_t> inverseBlock1;
     GlobalTensor<int32_t> inverseBlock2;
     GlobalTensor<float> inverseMsg;
 
-    GlobalTensor<int32_t> inverseResult;
-    GlobalTensor<int32_t> inverseResultBlock;
-
-    uint16_t syncWorkspaceSize;
-    uint8_t eventID {0};
-    uint64_t blockUniqueCnt {0};
-    float lastTileUniqueVal;
-
     uint32_t totalLength;
     uint32_t tileNum;
     uint32_t shortBlockTileNum;
     uint16_t tailLength;
+    uint16_t syncWorkspaceSize;
     uint8_t blockNum;
     uint8_t shortBlockNum;
+    size_t globalOffset;
+    size_t blockLength;
+    size_t blockRealLength;
 
-    size_t globalOffset; // Offset of data for current block.
-    size_t blockLength;  // Length of current block.
+
+    uint8_t eventID{0};
     bool hasInfFlag {false};
+    bool flagSorted{true};
     bool flagInverse {false};
     bool flagCounts {false};
 
-    //插入一个同步流水
-    uint32_t eventIDME3ToME2;
 };
 
-// Each block process diffent part of data. This function returns the element-wise first index of data by blockIdx.
-template<typename T>
-__aicore__ inline size_t KernelUnique<T>::GetGlobalOffset(const uint32_t blockIdx)
-{
-    // (shortBlockTileNum + 1) indicates longBlockTileNum.
-    const size_t offset =
-        (this->shortBlockTileNum * min(this->shortBlockNum, blockIdx) +
-            (this->shortBlockTileNum + 1) * (this->shortBlockNum >= blockIdx ? 0 : blockIdx - this->shortBlockNum)) *
-        TILE_LENGTH;
-    return offset;
-}
+
 
 template<typename T>
 __aicore__ inline void KernelUnique<T>::Init(
-    GM_ADDR input, GM_ADDR output, GM_ADDR uniqueCnt, 
+    GM_ADDR input, GM_ADDR output, GM_ADDR uniqueCnt,
     GM_ADDR inverse, GM_ADDR counts, GM_ADDR workspace,
     const uint32_t totalLength, const uint32_t shortBlockTileNum, const uint16_t tileLength,
     const uint16_t tailLength, const uint8_t aivNum, const uint8_t blockNum, const uint8_t shortBlockNum,
-    const bool flagInverse, const bool flagCounts)
+    const bool flagSorted, const bool flagInverse, const bool flagCounts)
 {
     this->totalLength = totalLength;
     this->shortBlockTileNum = shortBlockTileNum;
     this->tailLength = tailLength;
     this->blockNum = blockNum;
     this->shortBlockNum = shortBlockNum;
+    this->flagSorted = flagSorted;
     this->flagInverse = flagInverse;
     this->flagCounts = flagCounts;
 
     uint32_t alignedTotalLength = (totalLength + TILE_LENGTH - 1) / TILE_LENGTH * TILE_LENGTH;
     const bool isShortBlock = this->shortBlockNum > GetBlockIdx();
-    // (shortBlockTileNum + 1) indicates longBlockTileNum.
     this->tileNum = isShortBlock ? shortBlockTileNum : shortBlockTileNum + 1;
     this->blockLength = this->tileNum * TILE_LENGTH;
     this->globalOffset = GetGlobalOffset(GetBlockIdx());
-
-    srcGlobal.SetGlobalBuffer((__gm__ T*)input + globalOffset, this->blockLength);
-    srcGlobalAsUint.SetGlobalBuffer((__gm__ uint32_t*)input + globalOffset * sizeof(T) / sizeof(uint32_t),
-        this->blockLength * sizeof(T) / sizeof(uint32_t));
-    dstGlobal1.SetGlobalBuffer((__gm__ T*)output, alignedTotalLength);
-    dstGlobal1As32.SetGlobalBuffer((__gm__ int32_t*)output, alignedTotalLength * sizeof(T) / sizeof(int32_t));
-    uniqueCntGlobal.SetGlobalBuffer((__gm__ int32_t*)uniqueCnt, 1);
-
-    inverseResult.SetGlobalBuffer((__gm__ int32_t*)inverse, alignedTotalLength);
-    counterResult.SetGlobalBuffer((__gm__ int32_t*)counts, alignedTotalLength);
-    inverseResultBlock.SetGlobalBuffer((__gm__ int32_t*)inverse + globalOffset, this->blockLength);
-
-    // sortedBlock is offsetted, and could only see the data that this block should process.
-    sortedBlock1.SetGlobalBuffer((__gm__ float*)workspace + globalOffset * SORT_DATATYPE_SIZE_FACTOR,
-        this->blockLength * SORT_DATATYPE_SIZE_FACTOR);
-    sortedBlock1AsInt.SetGlobalBuffer((__gm__ int32_t*)workspace + globalOffset * SORT_DATATYPE_SIZE_FACTOR,
-        this->blockLength * SORT_DATATYPE_SIZE_FACTOR);
-    sortedBlock2.SetGlobalBuffer((__gm__ float*)workspace + alignedTotalLength * SORT_DATATYPE_SIZE_FACTOR +
-                                    globalOffset * SORT_DATATYPE_SIZE_FACTOR,
-        this->blockLength * SORT_DATATYPE_SIZE_FACTOR);
-    sortedBlock2AsInt.SetGlobalBuffer((__gm__ int32_t*)workspace + alignedTotalLength * SORT_DATATYPE_SIZE_FACTOR +
-                                        globalOffset * SORT_DATATYPE_SIZE_FACTOR,
-        this->blockLength * SORT_DATATYPE_SIZE_FACTOR);
-    // sortedGlobal could see all data in the workspace.
-    sortedGlobal1.SetGlobalBuffer((__gm__ float*)workspace, alignedTotalLength * SORT_DATATYPE_SIZE_FACTOR);
-    sortedGlobal2.SetGlobalBuffer((__gm__ float*)workspace + alignedTotalLength * SORT_DATATYPE_SIZE_FACTOR,
-        alignedTotalLength * SORT_DATATYPE_SIZE_FACTOR);
-
-    // Buff size for syncronizing according to document of IBWait&IBSet.
     this->syncWorkspaceSize = (blockNum * 32 * 8 + aivNum * 32 + 32) / sizeof(int32_t);
-    IBSyncGlobal.SetGlobalBuffer(
-        (__gm__ int32_t*)workspace + alignedTotalLength * SORT_DATATYPE_SIZE_FACTOR * 2, syncWorkspaceSize);
-    blockUniqueCntGlobal.SetGlobalBuffer((__gm__ uint32_t*)workspace + alignedTotalLength * 4 + syncWorkspaceSize,
-        (blockNum + 7) / 8 * 8); // Length aligned up to 32B.
+    this->blockRealLength = MIN((int32_t)blockLength, (int32_t)totalLength - (int32_t)globalOffset);
 
-    // 设置counter和inverse的临时全局空间，把前面的偏移全加过来
-    // 这里kernel侧定义和host侧的布局是反过来的，所以看起来和host侧不一样，看了半天
-    uint32_t counterOffset = alignedTotalLength * 4 + syncWorkspaceSize + (blockNum + 7) / 8 * 8;
+    // 初始化输入及输出 GM空间
+    srcGlobal.SetGlobalBuffer((__gm__ T*)input, alignedTotalLength);
+    srcBlock.SetGlobalBuffer((__gm__ T*)input + globalOffset, this->blockRealLength);
+    dstGlobal.SetGlobalBuffer((__gm__ T*)output, alignedTotalLength);
+    uniqueCntGlobal.SetGlobalBuffer((__gm__ int32_t*)uniqueCnt, 1);
+    inverseResult.SetGlobalBuffer((__gm__ int32_t*)inverse, alignedTotalLength);
+    inverseResultBlock.SetGlobalBuffer((__gm__ int32_t*)inverse + globalOffset, this->blockLength);
+    counterResult.SetGlobalBuffer((__gm__ int32_t*)counts, alignedTotalLength);
+    
+    // 初始化unique(核内及核间ping-pong归并) GM临时空间
+    sortedGlobal1.SetGlobalBuffer((__gm__ float*)workspace, alignedTotalLength * SORT_DATATYPE_SIZE_FACTOR);
+    sortedGlobal2.SetGlobalBuffer((__gm__ float*)workspace + alignedTotalLength * SORT_DATATYPE_SIZE_FACTOR, alignedTotalLength * SORT_DATATYPE_SIZE_FACTOR);
+    sortedBlock1.SetGlobalBuffer((__gm__ float*)workspace + globalOffset * SORT_DATATYPE_SIZE_FACTOR, this->blockLength * SORT_DATATYPE_SIZE_FACTOR);
+    sortedBlock2.SetGlobalBuffer((__gm__ float*)workspace + alignedTotalLength * SORT_DATATYPE_SIZE_FACTOR + globalOffset * SORT_DATATYPE_SIZE_FACTOR, this->blockLength * SORT_DATATYPE_SIZE_FACTOR);
+    sortedBlock1AsInt32.SetGlobalBuffer((__gm__ int32_t*)workspace + globalOffset * SORT_DATATYPE_SIZE_FACTOR, this->blockLength * SORT_DATATYPE_SIZE_FACTOR);
+    sortedBlock2AsInt32.SetGlobalBuffer((__gm__ int32_t*)workspace + alignedTotalLength * SORT_DATATYPE_SIZE_FACTOR + globalOffset * SORT_DATATYPE_SIZE_FACTOR, this->blockLength * SORT_DATATYPE_SIZE_FACTOR);
+
+    // 初始化核间同步 GM临时空间
+    IBSyncGlobal.SetGlobalBuffer((__gm__ int32_t*)workspace + alignedTotalLength * SORT_DATATYPE_SIZE_FACTOR * 2, syncWorkspaceSize);
+
+    // 初始化unique的核间同步计数空间
+    uniqueMsg.SetGlobalBuffer((__gm__ float*)workspace + alignedTotalLength * SORT_DATATYPE_SIZE_FACTOR * 2 + syncWorkspaceSize, ((blockNum + 7) / 8 * 8) * 3); 
+
+    // 初始化counter及inverse GM临时空间
+    uint32_t counterOffset = alignedTotalLength * 4 + syncWorkspaceSize + ((blockNum + 7) / 8 * 8) * 3;
+    uint32_t inverstOffset = counterOffset + alignedTotalLength + ((blockNum + 7) / 8 * 8) * 3;
     counterGlobal.SetGlobalBuffer((__gm__ int32_t*)workspace + counterOffset, alignedTotalLength);
     counterMsg.SetGlobalBuffer((__gm__ float*)workspace + counterOffset + alignedTotalLength, ((blockNum + 7) / 8 * 8) * 3);
-
-    uint32_t inverstOffset = counterOffset + alignedTotalLength + ((blockNum + 7) / 8 * 8) * 3;
-    
     inverseGlobal1.SetGlobalBuffer((__gm__ int32_t*)workspace + inverstOffset, alignedTotalLength * 2);
     inverseGlobal2.SetGlobalBuffer((__gm__ int32_t*)workspace + inverstOffset + alignedTotalLength * 2, alignedTotalLength * 2);
     inverseBlock1.SetGlobalBuffer((__gm__ int32_t*)workspace + inverstOffset + globalOffset * SORT_DATATYPE_SIZE_FACTOR, this->blockLength * SORT_DATATYPE_SIZE_FACTOR);
     inverseBlock2.SetGlobalBuffer((__gm__ int32_t*)workspace + inverstOffset + alignedTotalLength * 2 + globalOffset * SORT_DATATYPE_SIZE_FACTOR, this->blockLength * SORT_DATATYPE_SIZE_FACTOR);
     inverseMsg.SetGlobalBuffer((__gm__ float*)workspace + inverstOffset + alignedTotalLength * 4, ((blockNum + 7) / 8 * 8) * 3);
 
-    // Initialize sync buff.
-    if (GetBlockNum() > 1) {
+    if (blockNum > 1) {
         if (GetBlockIdx() == 0) {
             InitGlobalMemory(IBSyncGlobal, syncWorkspaceSize, 0);
         }
-        PipeBarrier<PIPE_ALL>();
+        AscendC::PipeBarrier<PIPE_ALL>();
     }
 
+    // 初始化UB计算临时空间
     pipe.InitBuffer(calcBuf[0], TILE_LEN_BYTE);
     pipe.InitBuffer(calcBuf[1], TILE_LEN_BYTE);
     pipe.InitBuffer(calcBuf[2], TILE_LEN_BYTE);
 }
 
 template<typename T>
+__aicore__ inline size_t KernelUnique<T>::GetGlobalOffset(const uint32_t blockIdx)
+{
+    const size_t offset =
+        (this->shortBlockTileNum * MIN(this->shortBlockNum, blockIdx) +
+            (this->shortBlockTileNum + 1) * (this->shortBlockNum >= blockIdx ? 0 : blockIdx - this->shortBlockNum)) * TILE_LENGTH;
+    return offset;
+}
+
+template<typename T>
 __aicore__ inline void KernelUnique<T>::Process()
 {
-    // Sort within each tile.
-    for (int32_t tileIdx = 0; tileIdx < this->tileNum; tileIdx++) {
-        CopyIn(tileIdx);
-        Elem32Sort(tileIdx);
-        TileSort(tileIdx);
-    }
+    // 逐tile排序
+    SortTile();
+    // 核内归并
+    MrgBlock();
+    // 核间归并
+    SyncAll();
+    MrgGlobal();
+    SyncAll();
 
-    if (GetBlockNum() > 1) {
-        if (this->tileNum > 1) {
-            BlockSortV2(); // Sort within each block.
-        }
+    // 如果是递增输出，则需要翻转回去
+    if(flagSorted) CalculateFlip();
+    // counts计算
+    if (flagCounts) CalculateCounts();
+    // inverse计算
+    if (flagInverse) CalculateInverse();
+    // 去重
+    CalculateUnique();
+    SyncAll();
 
-        SyncAll();
-        GlobalSortV2(); // Sort globally.
-        SyncAll();
-    }
-
-    // Check if an inf value exists. If do, inf will be append to the result in TileUnique().
-    if ((IsSameType<T, bfloat16_t>::value || IsSameType<T, half>::value || IsSameType<T, float>::value) &&
-        GetBlockIdx() == blockNum - 1) {
-        if (sortedGlobal1.GetValue((totalLength - 1) * 2) == -FLOAT_INF) {
-            hasInfFlag = true;
-        }
-    }
-
-    // counts计算逻辑
-    if (flagCounts) {
-        CalculateCounts();
-    }
-
-    // inverse计算逻辑
-    if (flagInverse) {
-        CalculateInverse();
-    }
-
-    // Do unique in each block based on tiles.
-    for (int32_t tileIdx = 0; tileIdx < this->tileNum; tileIdx++) {
-        TileUnique(tileIdx);
-    }
-
-    if (this->blockNum > 1) {
-        // Each block waits for its former block to upload blockUniqueCnt.
-        LocalTensor<int32_t> IBSyncLocal = calcBuf[0].Get<int32_t>();
-        if (GetBlockIdx() != 0) {
-            IBWait(IBSyncGlobal, IBSyncLocal, (int32_t)GetBlockIdx() - 1, eventID);
-        }
-        IBSet(IBSyncGlobal, IBSyncLocal, (int32_t)GetBlockIdx(), eventID);
-    }
-
-    // Gather result from every block.
+    // 结果写出
     CopyOut();
 }
 
-template<typename T>
-__aicore__ inline void KernelUnique<T>::CopyIn(const int32_t progress)
+template <typename T>
+__aicore__ inline void KernelUnique<T>::SortTile()
 {
-    LocalTensor<T> srcLocal = calcBuf[0].Get<T>();
-    LocalTensor<float> sortedLocal2 = calcBuf[2].Get<float>();
+    LocalTensor<float> input = calcBuf[0].Get<float>();
+    LocalTensor<float> tmp = input[TILE_LENGTH].ReinterpretCast<float>();
+    LocalTensor<int32_t> arange = calcBuf[1].Get<int32_t>();
+    
+    for (uint32_t i = 0; i < tileNum; i++) {
+        int32_t tileLen = MIN(TILE_LENGTH, blockRealLength - i * TILE_LENGTH);
+        uint32_t repeat = (tileLen + 31) / 32;
+        AscendC::Duplicate<float>(input, -FLOAT_INF, TILE_LENGTH);
 
-    // To process tail, fill the whole tile with INF, then cover it with tail.
-    int32_t castLen; // Valid length of the last block.
-    if ((progress != tileNum - 1) || (GetBlockIdx() != blockNum - 1) || tailLength == 0) {
-        // Must determine during compilation, otherwise we get a compilation error.
-        if constexpr (!IsSameType<T, float>::value) {
-            DataCopy(srcLocal, srcGlobal[progress * TILE_LENGTH], TILE_LENGTH);
+        // 这里做多类型支持，先把输入转换成float，中间计算过程都用float进行，最后再转换回去。
+         if constexpr (IsSameType<T, float>::value) {
+            // float: 直接搬到 float buf
+            AscendC::DataCopyPad(tmp, srcBlock[i * TILE_LENGTH], 
+                {1, static_cast<uint32_t>(tileLen * sizeof(float)), 0, 0, 0}, {false, 0, 0, 0});
+            AscendC::PipeBarrier<PIPE_ALL>();
         } else {
-            DataCopy(sortedLocal2, srcGlobal[progress * TILE_LENGTH], TILE_LENGTH);
+            // 非 float (int32 & fp16 bf16 int8等): 先读进来 再 Cast 成 float
+            LocalTensor<T> srcAsT = calcBuf[2].Get<T>();
+            AscendC::DataCopyPad(srcAsT, srcBlock[i * TILE_LENGTH],
+                {1, static_cast<uint32_t>(tileLen * sizeof(T)), 0, 0, 0}, {false, 0, 0, 0});
+            AscendC::PipeBarrier<PIPE_ALL>();
+            if constexpr (sizeof(T) >= sizeof(float)) {
+                AscendC::Cast(tmp, srcAsT, AscendC::RoundMode::CAST_ROUND, tileLen);
+            } else {
+                AscendC::Cast(tmp, srcAsT, AscendC::RoundMode::CAST_NONE, tileLen);
+            }
+            AscendC::PipeBarrier<PIPE_V>();
         }
-        castLen = TILE_LENGTH;
-    } else {
-        // Process tail.
-        LocalTensor<uint32_t> srcAsUint = srcLocal.template ReinterpretCast<uint32_t>();
-        Duplicate(sortedLocal2, FLOAT_INF, TILE_LENGTH);
-        if constexpr (IsSameType<T, float>::value) {
-            PipeBarrier<PIPE_ALL>();
-            DataCopyPad(sortedLocal2, srcGlobal[progress * TILE_LENGTH],
-                {1, static_cast<uint16_t>(sizeof(T) * tailLength), 0, 0}, {false, 0, 0, 0});
-        } else if constexpr (sizeof(T) >= sizeof(float)) {
-            PipeBarrier<PIPE_V>();
-            DataCopyPad(srcAsUint, srcGlobalAsUint[progress * TILE_LENGTH * sizeof(T) / sizeof(uint32_t)],
-                {1, static_cast<uint16_t>(sizeof(T) * tailLength), 0, 0}, {false, 0, 0, 0});
-        } else {
-            PipeBarrier<PIPE_V>();
-            DataCopyPad(srcLocal, srcGlobal[progress * TILE_LENGTH],
-                {1, static_cast<uint16_t>(sizeof(T) * tailLength), 0, 0}, {false, 0, 0, 0});
-        }
-        castLen = tailLength;
+
+        //如果需要递增输出，则乘以-1
+        AscendC::Muls(input, tmp, flagSorted ? -1.0f : 1.0f, tileLen);
+        AscendC::PipeBarrier<PIPE_V>();
+	    //构造递增数组用于后续inverse计算
+        AscendC::Arange(arange, static_cast<int32_t>(globalOffset + i * TILE_LENGTH), 1, TILE_LENGTH);
+        AscendC::PipeBarrier<PIPE_V>();
+        LocalTensor<float> dstLocal = calcBuf[2].Get<float>();
+	    //255个repeat超限 拆成两次排
+        AscendC::Sort32<float>(dstLocal, input, arange.ReinterpretCast<uint32_t>(), 128);
+        AscendC::PipeBarrier<PIPE_V>();
+        AscendC::Sort32<float>(dstLocal[TILE_LENGTH], input[TILE_LENGTH / 2], arange[TILE_LENGTH / 2].ReinterpretCast<uint32_t>(), 128);
+        AscendC::PipeBarrier<PIPE_V>();
+        bool readFromSort = MrgTile(dstLocal, input, TILE_LENGTH);
+        SyncDiffPipe<AscendC::HardEvent::V_MTE3>();
+        //tile内排序完成后写入GM
+        AscendC::DataCopyPad(sortedBlock1[i * TILE_LENGTH * 2],
+                            readFromSort ? dstLocal : input,
+                            {2, static_cast<uint16_t>(sizeof(float) * TILE_LENGTH), 0, 0});
+        AscendC::PipeBarrier<PIPE_ALL>();
     }
-    PipeBarrier<PIPE_ALL>();
-    if constexpr (!IsSameType<T, float>::value) {
-        if constexpr (sizeof(T) >= sizeof(float)) {
-            Cast(sortedLocal2, srcLocal, RoundMode::CAST_ROUND, castLen);
-        } else {
-            Cast(sortedLocal2, srcLocal, RoundMode::CAST_NONE, castLen);
-        }
-        PipeBarrier<PIPE_V>();
-    }
-    Muls(sortedLocal2, sortedLocal2, (float)-1, TILE_LENGTH);
 }
 
-template<typename T>
-__aicore__ inline void KernelUnique<T>::Elem32Sort(const int32_t progress)
+template <typename T>
+__aicore__ inline bool KernelUnique<T>::MrgTile(
+    const LocalTensor<float>& sortArray,
+    const LocalTensor<float>& tmpArray,
+    int32_t numElements)
 {
-    LocalTensor<T> srcLocal = calcBuf[0].Get<T>();
-    LocalTensor<float> sortedLocal1 = calcBuf[1].Get<float>();
-    LocalTensor<float> sortedLocal2 = calcBuf[2].Get<float>();
-    LocalTensor<int32_t> arithLocal = srcLocal.template ReinterpretCast<int32_t>()[TILE_LENGTH];
+    int32_t numGroups = (numElements + 31) / 32;
+    int32_t groupSize = 32;
+    bool readFromSort = true;
+    // tile内合并 调用MrgSort 以 4x32 -> 4x128 -> 4x512推进
+    while (numGroups > 1) {
+        // UB间ping-pong互换归并
+        const LocalTensor<float>& src = readFromSort ? sortArray : tmpArray;
+        const LocalTensor<float>& dst = readFromSort ? tmpArray : sortArray;
+        int32_t stride = groupSize * 2;
 
-    int32_t baseOffset = progress * TILE_LENGTH + this->globalOffset; // calc tileOffset
-
-    // Duplicate(arithLocal, baseOffset, TILE_LENGTH);
-    ArithProgression(arithLocal, baseOffset, (int32_t)1, TILE_LENGTH);
-
-    PipeBarrier<PIPE_V>();
-
-    LocalTensor<uint32_t> uidArray = arithLocal.template ReinterpretCast<uint32_t>();
-    // Max repeatTime of Sort32 is 255, which is exceeded because TILE_LENGTH is 8192.
-    constexpr uint8_t sort32BatchSize = 32;
-    constexpr uint8_t sort32RepeatLimit = 255;
-    int instrRepeatTime = 0;
-    int restLen = TILE_LENGTH;
-    while (restLen) {
-        int repTime = min(restLen / sort32BatchSize, sort32RepeatLimit);
-        Sort32<float>(sortedLocal1[sort32BatchSize * sort32RepeatLimit * SORT_DATATYPE_SIZE_FACTOR * instrRepeatTime],
-            sortedLocal2[sort32BatchSize * sort32RepeatLimit * instrRepeatTime],
-            uidArray[sort32BatchSize * sort32RepeatLimit * instrRepeatTime], repTime);
-        restLen -= repTime * sort32BatchSize;
-        instrRepeatTime++;
-    }
-    PipeBarrier<PIPE_ALL>();
-}
-
-template<typename T>
-__aicore__ inline void KernelUnique<T>::TileSort(const int32_t progress)
-{
-    LocalTensor<float> sortedLocal1 = calcBuf[1].Get<float>();
-    LocalTensor<float> sortedLocal2 = calcBuf[2].Get<float>();
-    LocalTensor<float> sortedQue[2] = {sortedLocal1, sortedLocal2};
-    uint16_t currentQueLength = 32; // Initial queue length is 32 because data is from Sort32.
-    uint16_t currentQueNum = TILE_LENGTH / currentQueLength;
-    bool switchFlag = false;
-    // Multiple MrgSort until we have one generally sorted tile.
-    while (currentQueLength < TILE_LENGTH) {
-        const uint16_t elementLengths[4] = {currentQueLength, currentQueLength, currentQueLength, currentQueLength};
-        const uint16_t fullMrgSortTime = currentQueNum / 4;
-        if (fullMrgSortTime > 0) {
-            MrgSort4Info params = {elementLengths, false, 0b1111, fullMrgSortTime};
-            MrgSort<float>(sortedQue[!switchFlag],
-                {sortedQue[switchFlag][0], sortedQue[switchFlag][currentQueLength * 1 * 2],
-                    sortedQue[switchFlag][currentQueLength * 2 * 2], sortedQue[switchFlag][currentQueLength * 3 * 2]},
-                params);
-            PipeBarrier<PIPE_ALL>();
-            switchFlag = !switchFlag;
+        AscendC::MrgSortSrcList<float> srcList;
+        AscendC::MrgSort4Info params;
+        params.ifExhaustedSuspension = false;
+        params.repeatTimes = 1;
+        int32_t sets = (numGroups + 3) / 4;
+        for (int s = 0; s < sets; s++) {
+            int base = s * 4 * stride;
+            int offset0 = base;
+            int offset1 = base + stride;
+            int offset2 = base + stride * 2;
+            int offset3 = base + stride * 3;
+            params.elementLengths[0] = (uint16_t)MIN(groupSize, MAX(0, numElements - offset0 / 2));
+            params.elementLengths[1] = (uint16_t)MIN(groupSize, MAX(0, numElements - offset1 / 2));
+            params.elementLengths[2] = (uint16_t)MIN(groupSize, MAX(0, numElements - offset2 / 2));
+            params.elementLengths[3] = (uint16_t)MIN(groupSize, MAX(0, numElements - offset3 / 2));
+            if (params.elementLengths[1] == 0) {
+                Copy(dst[base], src[base], (uint64_t)64,
+                     (uint8_t)((params.elementLengths[0] * 2 * 4 + 255) / 256),
+                     {1, 1, 8, 8});
+                AscendC::PipeBarrier<PIPE_ALL>();
+                break;
+            }
+            params.validBit =
+                (params.elementLengths[2] == 0 ? 3 :
+                (params.elementLengths[3] == 0 ? 7 : 15));
+            srcList.src1 = src[offset0];
+            srcList.src2 = src[offset1];
+            srcList.src3 = src[offset2];
+            srcList.src4 = src[offset3];
+            AscendC::MrgSort<float>(dst[base], srcList, params);
+            AscendC::PipeBarrier<PIPE_ALL>();
         }
-        currentQueNum = fullMrgSortTime;
-        currentQueLength *= 4;
+        numGroups = (numGroups + 3) / 4;
+        groupSize *= 4;
+        readFromSort = !readFromSort;
     }
-    DataCopy(sortedBlock1[progress * TILE_LEN_ELEM], sortedQue[switchFlag], TILE_LEN_ELEM);
-    PipeBarrier<PIPE_ALL>();
+    return readFromSort;
 }
 
-template<typename T>
-template<typename T1>
-__aicore__ inline void KernelUnique<T>::DataCopyGM2GM(const GlobalTensor<T1>& dst, const GlobalTensor<T1>& src,
-    const LocalTensor<T1>& tmpLocal, const int elemLength, const int bufByteLength)
-{
-    // Max byte size of DataCopyPad in one repeat is 65535.
-    int bufElemLength = min(bufByteLength, 65535) / sizeof(T1);
-    int restLen = elemLength;
-    while (restLen > 0) {
-        int copyLen = min(restLen, bufElemLength);
-        DataCopyPad(tmpLocal, src[elemLength - restLen], {1, static_cast<uint16_t>(sizeof(T1) * copyLen), 0, 0},
-            {false, 0, 0, 0});
-        PipeBarrier<PIPE_ALL>();
-        DataCopyPad(dst[elemLength - restLen], tmpLocal, {1, static_cast<uint16_t>(sizeof(T1) * copyLen), 0, 0});
-        PipeBarrier<PIPE_ALL>();
-        restLen -= copyLen;
-    }
-}
-
-template<typename T>
+template <typename T>
 __aicore__ inline void KernelUnique<T>::MrgSortGM(
     GlobalTensor<float>&& dstGlobal, GMSSrcList& srcList, GMSParams& params)
 {
-    int restLen[4] {params.GMSLengths[0], params.GMSLengths[1], params.GMSLengths[2], params.GMSLengths[3]};
-    int currentHead[4] {};
-    int totalMrgLen {};
+    int restLen[4] = {params.GMSLengths[0], params.GMSLengths[1], params.GMSLengths[2], params.GMSLengths[3]};
+    int currentHead[4] = {0, 0, 0, 0};
+    int totalMrgLen = 0;
     uint8_t queNum = params.queNum;
-    // limited by MrgSort api constraint and mrgLocal size, we set different buffer length due to diffent queNum.
-    // mrgLocal contains 8192 elems, and MrgSort limits max 4095 elems per queue.
-    constexpr int BUFFER_LEN[5] {0, 0, 4095, 2730, 2048};
     uint16_t sortedLen[4];
-    uint16_t mrgLen[4] {};
+    uint16_t mrgLen[4] = {0, 0, 0, 0};
+
     while (queNum > 1) {
         int currentBufferLen = BUFFER_LEN[queNum];
         for (int i = 0; i < queNum; i++) {
-            mrgLen[i] = min(restLen[i], currentBufferLen);
+            mrgLen[i] = MIN(restLen[i], currentBufferLen);
         }
         // CopyIn
         for (int i = 0; i < queNum; i++) {
-            DataCopyPad(params.buffLocal[i], srcList[i][currentHead[i] * SORT_DATATYPE_SIZE_FACTOR],
-                {1, static_cast<uint16_t>(sizeof(float) * mrgLen[i] * SORT_DATATYPE_SIZE_FACTOR), 0, 0},
+            AscendC::DataCopyPad(params.buffLocal[i],
+                srcList[i][currentHead[i] * SORT_DATATYPE_SIZE_FACTOR],
+                {1, static_cast<uint32_t>(sizeof(float) * mrgLen[i] * SORT_DATATYPE_SIZE_FACTOR), 0, 0, 0},
                 {false, 0, 0, 0});
         }
-        PipeBarrier<PIPE_ALL>();
+        AscendC::PipeBarrier<PIPE_ALL>();
         // MrgSort
-        MrgSort4Info localParams {mrgLen, true, VALID_QUE[queNum], 1};
-        MrgSort<float>(params.buffLocal[4],
-            {params.buffLocal[0], params.buffLocal[1], params.buffLocal[2], params.buffLocal[3]}, localParams);
-        PipeBarrier<PIPE_ALL>();
-        GetMrgSortResult(sortedLen[0], sortedLen[1], sortedLen[2], sortedLen[3]);
+        AscendC::MrgSort4Info localParams = {mrgLen, true, VALID_QUE[queNum], 1};
+        AscendC::MrgSort<float>(params.buffLocal[4],
+            {params.buffLocal[0], params.buffLocal[1], params.buffLocal[2], params.buffLocal[3]},
+            localParams);
+        AscendC::PipeBarrier<PIPE_ALL>();
+        AscendC::GetMrgSortResult(sortedLen[0], sortedLen[1], sortedLen[2], sortedLen[3]);
         const uint16_t localMrgLen = sortedLen[0] + sortedLen[1] + sortedLen[2] + sortedLen[3];
         // CopyOut
-        DataCopyPad(dstGlobal[totalMrgLen * SORT_DATATYPE_SIZE_FACTOR], params.buffLocal[4],
-            {1, static_cast<uint16_t>(sizeof(float) * localMrgLen * SORT_DATATYPE_SIZE_FACTOR), 0, 0});
-        PipeBarrier<PIPE_ALL>();
-        // renew currentHead, restLen
+        AscendC::DataCopyPad(dstGlobal[totalMrgLen * SORT_DATATYPE_SIZE_FACTOR], params.buffLocal[4],
+            {1, static_cast<uint32_t>(sizeof(float) * localMrgLen * SORT_DATATYPE_SIZE_FACTOR), 0, 0, 0});
+        AscendC::PipeBarrier<PIPE_ALL>();
+        // Advance heads / decrement restLen
         totalMrgLen += localMrgLen;
         for (int i = 0; i < queNum; i++) {
             restLen[i] -= sortedLen[i];
             currentHead[i] += sortedLen[i];
         }
-        // Switch empty to tail
+        // Compact: remove any empty queue (at most one per iteration with ifExhaustedSuspension=true)
         for (int i = 0; i < queNum; i++) {
             if (restLen[i] == 0) {
                 for (int j = i; j < 3; j++) {
@@ -486,282 +417,183 @@ __aicore__ inline void KernelUnique<T>::MrgSortGM(
                 }
                 restLen[3] = 0;
                 queNum--;
-                break; // because ifExhaustedSuspension == true, there is 0 or 1 empty que.
+                break;
             }
         }
     }
-    // Process tail
+    // Tail: only 1 queue left, GM->GM copy remaining
     for (int i = 0; i < params.queNum; i++) {
         if (restLen[i] > 0) {
             DataCopyGM2GM(dstGlobal[totalMrgLen * SORT_DATATYPE_SIZE_FACTOR],
-                srcList[i][currentHead[i] * SORT_DATATYPE_SIZE_FACTOR], params.buffLocal[4],
+                srcList[i][currentHead[i] * SORT_DATATYPE_SIZE_FACTOR],
+                params.buffLocal[4],
                 restLen[i] * SORT_DATATYPE_SIZE_FACTOR, TILE_LEN_BYTE);
             break;
         }
     }
-};
+}
 
-template<typename T>
-__aicore__ inline void KernelUnique<T>::BlockSortV2()
+template <typename T>
+__aicore__ inline void KernelUnique<T>::MrgBlock()
 {
-    LocalTensor<float> sortedLocal1 = calcBuf[0].Get<float>();
-    LocalTensor<float> sortedLocal2 = calcBuf[1].Get<float>();
-    LocalTensor<float> mrgLocal = calcBuf[2].Get<float>();
-    GlobalTensor<float> sortedBlock[2] = {sortedBlock1, sortedBlock2};
+    if (tileNum <= 1) return;
 
-    // Each time merge 4 queues into 1 queue.
+    LocalTensor<float> sortedLocal1 = calcBuf[0].template Get<float>();
+    LocalTensor<float> sortedLocal2 = calcBuf[1].template Get<float>();
+    LocalTensor<float> mrgLocal = calcBuf[2].template Get<float>();
+    GlobalTensor<float> sortedBlockArr[2] = {sortedBlock1, sortedBlock2};
+
     constexpr uint8_t PREFIX_QUE_NUM = 4;
     bool switchFlag = false;
-    GlobalTensor<float> srcGlobal[4];
-    LocalTensor<float> buffLocal[5];
+    GlobalTensor<float> srcGM[4];
     int lengths[4];
-    for (int bindTile = 1; bindTile < tileNum; bindTile *= PREFIX_QUE_NUM) {
-        for (int tileIdx = 0; tileIdx < tileNum; tileIdx += bindTile * PREFIX_QUE_NUM) {
-            int mrgTileNum = min(tileNum - tileIdx, bindTile * PREFIX_QUE_NUM);
+
+    for (int bindTile = 1; bindTile < (int32_t)tileNum; bindTile *= PREFIX_QUE_NUM) {
+        for (int tileIdx = 0; tileIdx < (int32_t)tileNum; tileIdx += bindTile * PREFIX_QUE_NUM) {
+            int mrgTileNum = MIN((int32_t)tileNum - tileIdx, bindTile * PREFIX_QUE_NUM);
             uint8_t queNum = (mrgTileNum + bindTile - 1) / bindTile;
             uint8_t lastQueTileNum = mrgTileNum % bindTile;
             if (lastQueTileNum == 0) {
                 lastQueTileNum = bindTile;
             }
-            // Init GMSSrcList, GMSParams
             for (int i = 0; i < queNum; i++) {
-                srcGlobal[i] = sortedBlock[switchFlag][TILE_LEN_ELEM * (tileIdx + bindTile * i)];
+                srcGM[i] = sortedBlockArr[switchFlag][TILE_LEN_ELEM * (tileIdx + bindTile * i)];
             }
             for (int i = 0; i < queNum - 1; i++) {
                 lengths[i] = TILE_LENGTH * bindTile;
             }
             lengths[queNum - 1] = TILE_LENGTH * lastQueTileNum;
-            GMSSrcList srcList {srcGlobal};
-            GMSParams params {lengths, queNum,
+
+            GMSSrcList srcList{srcGM};
+            GMSParams params{lengths, queNum,
                 {sortedLocal1, sortedLocal1[TILE_LENGTH], sortedLocal2, sortedLocal2[TILE_LENGTH], mrgLocal}};
-            MrgSortGM(sortedBlock[!switchFlag][TILE_LEN_ELEM * tileIdx], srcList, params);
+            MrgSortGM(sortedBlockArr[!switchFlag][TILE_LEN_ELEM * tileIdx], srcList, params);
         }
         switchFlag = !switchFlag;
     }
+    // Ensure final result is in sortedBlock1
     if (switchFlag) {
-        DataCopyGM2GM(sortedBlock1, sortedBlock2, sortedLocal1, blockLength * SORT_DATATYPE_SIZE_FACTOR, TILE_LEN_BYTE);
+        DataCopyGM2GM(sortedBlock1, sortedBlock2, sortedLocal1,
+            (int)(blockLength * SORT_DATATYPE_SIZE_FACTOR), TILE_LEN_BYTE);
     }
+    AscendC::PipeBarrier<PIPE_ALL>();
 }
 
-template<typename T>
-__aicore__ inline void KernelUnique<T>::GlobalSortV2()
-{
-    LocalTensor<float> sortedLocal1 = calcBuf[0].Get<float>();
-    LocalTensor<float> sortedLocal2 = calcBuf[1].Get<float>();
-    LocalTensor<float> mrgLocal = calcBuf[2].Get<float>();
-    LocalTensor<int32_t> IBSyncLocal = sortedLocal2.ReinterpretCast<int32_t>();
-    GlobalTensor<float> sortedGlobal[2] = {sortedGlobal1, sortedGlobal2};
 
-    // Each time merge up to 4 queues into 1 queue.
+template <typename T>
+__aicore__ inline void KernelUnique<T>::MrgGlobal()
+{
+    if (blockNum <= 1) return;
+
+    LocalTensor<float> sortedLocal1 = calcBuf[0].template Get<float>();
+    LocalTensor<float> sortedLocal2 = calcBuf[1].template Get<float>();
+    LocalTensor<float> mrgLocal = calcBuf[2].template Get<float>();
+    LocalTensor<int32_t> IBSyncLocal = sortedLocal2.ReinterpretCast<int32_t>();
+    GlobalTensor<float> sortedGlobalArr[2] = {sortedGlobal1, sortedGlobal2};
+
     constexpr uint8_t PREFIX_QUE_NUM = 4;
     bool switchFlag = false;
-    GlobalTensor<float> srcGlobal[4];
+    GlobalTensor<float> srcGM[4];
     int lengths[4];
-    for (int bindBlock = 1; bindBlock < blockNum; bindBlock *= PREFIX_QUE_NUM, eventID++) {
-        for (int blockIdx = 0; blockIdx < blockNum; blockIdx += bindBlock * PREFIX_QUE_NUM) {
-            if ((GetBlockIdx() == blockIdx + bindBlock) || (GetBlockIdx() == blockIdx + bindBlock * 2) ||
-                (GetBlockIdx() == blockIdx + bindBlock * 3)) {
-                PipeBarrier<PIPE_ALL>();
+
+    for (int bindBlock = 1; bindBlock < (int32_t)blockNum; bindBlock *= PREFIX_QUE_NUM, eventID++) {
+        for (int blockIdx = 0; blockIdx < (int32_t)blockNum; blockIdx += bindBlock * PREFIX_QUE_NUM) {
+            if ((int32_t)GetBlockIdx() == blockIdx + bindBlock ||
+                (int32_t)GetBlockIdx() == blockIdx + bindBlock * 2 ||
+                (int32_t)GetBlockIdx() == blockIdx + bindBlock * 3) {
+                // Non-leader: signal readiness
+                AscendC::PipeBarrier<PIPE_ALL>();
                 IBSet(IBSyncGlobal, IBSyncLocal, (int32_t)GetBlockIdx(), eventID);
-                PipeBarrier<PIPE_ALL>();
-            } else if (GetBlockIdx() == blockIdx) {
-                int mrgBlockNum = min(blockNum - blockIdx, bindBlock * PREFIX_QUE_NUM);
+                AscendC::PipeBarrier<PIPE_ALL>();
+            } else if ((int32_t)GetBlockIdx() == blockIdx) {
+                // Leader: wait for non-leaders, then merge
+                int mrgBlockNum = MIN((int32_t)blockNum - blockIdx, bindBlock * PREFIX_QUE_NUM);
                 uint8_t queNum = (mrgBlockNum + bindBlock - 1) / bindBlock;
                 for (int i = 1; i < queNum; i++) {
-                    PipeBarrier<PIPE_ALL>();
-                    IBWait(IBSyncGlobal, IBSyncLocal, (int32_t)blockIdx + (bindBlock * i), eventID);
-                    PipeBarrier<PIPE_ALL>();
+                    AscendC::PipeBarrier<PIPE_ALL>();
+                    IBWait(IBSyncGlobal, IBSyncLocal, (int32_t)blockIdx + bindBlock * i, eventID);
+                    AscendC::PipeBarrier<PIPE_ALL>();
                 }
-                // 判断最后一个队列包含了多少个block的数据.
                 uint8_t lastQueBlockNum = mrgBlockNum % bindBlock;
                 if (lastQueBlockNum == 0) {
                     lastQueBlockNum = bindBlock;
                 }
-                // Init GMSSrcList, GMSParams
                 for (int i = 0; i < queNum; i++) {
-                    srcGlobal[i] =
-                        sortedGlobal[switchFlag][GetGlobalOffset(blockIdx + bindBlock * i) * SORT_DATATYPE_SIZE_FACTOR];
+                    srcGM[i] = sortedGlobalArr[switchFlag][GetGlobalOffset(blockIdx + bindBlock * i) * SORT_DATATYPE_SIZE_FACTOR];
                 }
                 for (int i = 0; i < queNum - 1; i++) {
-                    lengths[i] =
-                        GetGlobalOffset(blockIdx + (bindBlock * (i + 1))) - GetGlobalOffset(blockIdx + (bindBlock * i));
+                    lengths[i] = (int32_t)(GetGlobalOffset(blockIdx + bindBlock * (i + 1)) - GetGlobalOffset(blockIdx + bindBlock * i));
                 }
-                lengths[queNum - 1] = GetGlobalOffset(blockIdx + (bindBlock * (queNum - 1)) + lastQueBlockNum) -
-                                    GetGlobalOffset(blockIdx + (bindBlock * (queNum - 1)));
-                GMSSrcList srcList {srcGlobal};
-                GMSParams params {lengths, queNum,
+                lengths[queNum - 1] = (int32_t)(GetGlobalOffset(blockIdx + bindBlock * (queNum - 1) + lastQueBlockNum) -
+                                                GetGlobalOffset(blockIdx + bindBlock * (queNum - 1)));
+
+                GMSSrcList srcList{srcGM};
+                GMSParams params{lengths, queNum,
                     {sortedLocal1, sortedLocal1[TILE_LENGTH], sortedLocal2, sortedLocal2[TILE_LENGTH], mrgLocal}};
-                MrgSortGM(
-                    sortedGlobal[!switchFlag][GetGlobalOffset(blockIdx) * SORT_DATATYPE_SIZE_FACTOR], srcList, params);
+                MrgSortGM(sortedGlobalArr[!switchFlag][GetGlobalOffset(blockIdx) * SORT_DATATYPE_SIZE_FACTOR],
+                          srcList, params);
             }
         }
         switchFlag = !switchFlag;
     }
-    // Switch valid workspace pointer.
+
+    // Swap so final result is in sortedGlobal1 / sortedBlock1 (also swap int32 views)
     if (switchFlag) {
         GlobalTensor<float> tmpGlobal = sortedGlobal1;
         sortedGlobal1 = sortedGlobal2;
         sortedGlobal2 = tmpGlobal;
 
-        GlobalTensor<float> tmpGlobal1 = sortedBlock1;
+        GlobalTensor<float> tmpBlock = sortedBlock1;
         sortedBlock1 = sortedBlock2;
-        sortedBlock2 = tmpGlobal1;
+        sortedBlock2 = tmpBlock;
 
-        GlobalTensor<int32_t> tmpGlobal2 = sortedBlock1AsInt;
-        sortedBlock1AsInt = sortedBlock2AsInt;
-        sortedBlock2AsInt = tmpGlobal2;
+        GlobalTensor<int32_t> tmpBlockInt = sortedBlock1AsInt32;
+        sortedBlock1AsInt32 = sortedBlock2AsInt32;
+        sortedBlock2AsInt32 = tmpBlockInt;
     }
 }
 
-template<typename T>
-__aicore__ inline void KernelUnique<T>::ConsecutiveUnique(const LocalTensor<float>& dstVal,
-    const LocalTensor<float>& srcLocal, const LocalTensor<float>& shiftedLocal, const LocalTensor<uint32_t>& bitMask32,
-    const uint16_t elemLength, uint64_t& tileUniqueCnt)
+
+
+template <typename T>
+__aicore__ inline void KernelUnique<T>::CalculateFlip()
 {
-    LocalTensor<uint16_t> bitMask16 = bitMask32.ReinterpretCast<uint16_t>();
-    uint64_t rsvdCnt = 0;
-    // Seperate Val and Idx.
-    GatherMask(dstVal, srcLocal, 1, false, 0, {1, static_cast<uint16_t>((elemLength * 2 + 63) / 64), 8, 0}, rsvdCnt);
-    PipeBarrier<PIPE_V>();
-
-    // Gen bitMask to calc shifted array.
-    Duplicate(bitMask16, (uint16_t)0b1111111111111111, elemLength / 16);
-    PipeBarrier<PIPE_V>();
-    bitMask16.SetValue(0, 0b1111111111111110);
-
-    // Calc shifted array.
-    GatherMask(shiftedLocal, dstVal, bitMask32, true, elemLength, {1, 1, 8, 8}, rsvdCnt);
-    PipeBarrier<PIPE_V>();
-    // Set the last val as INF in order to avoid dropping the last unique val.
-    shiftedLocal.SetValue(elemLength - 1, -FLOAT_INF);
-
-    // Generate bitMask which represents unique numbers.
-    Compare(bitMask16, dstVal, shiftedLocal, CMPMODE::NE, (elemLength + 63) / 64 * 64);
-    PipeBarrier<PIPE_V>();
-
-    // Gather unique numbers and their idx.
-    GatherMask(dstVal, dstVal, bitMask32, true, elemLength, {1, 1, 8, 8}, tileUniqueCnt);
-    PipeBarrier<PIPE_V>();
-}
-
-template<typename T>
-__aicore__ inline void KernelUnique<T>::TileUnique(const int32_t progress)
-{
-    LocalTensor<uint32_t> bitMask32 = calcBuf[0].Get<uint32_t>();
-    LocalTensor<float> shiftedLocal = bitMask32[TILE_LENGTH].ReinterpretCast<float>();
-    LocalTensor<float> sortedLocal1 = calcBuf[1].Get<float>();
-    LocalTensor<float> sortedLocal2 = calcBuf[2].Get<float>();
-    LocalTensor<uint32_t> uniqueCntLocal = shiftedLocal.ReinterpretCast<uint32_t>();
-    uint64_t tileUniqueCnt;
-    uint64_t tmpRsvdCnt;
-
-    DataCopy(sortedLocal1, sortedBlock1[progress * TILE_LEN_ELEM], TILE_LEN_ELEM);
-    PipeBarrier<PIPE_ALL>();
-
-    ConsecutiveUnique(sortedLocal2, sortedLocal1, shiftedLocal, bitMask32, TILE_LENGTH, tileUniqueCnt);
-    PipeBarrier<PIPE_ALL>();
-    // If has inf, append.
-    if ((progress == tileNum - 1) && hasInfFlag) {
-        sortedLocal2.SetValue(tileUniqueCnt, -FLOAT_INF);
-        tileUniqueCnt++;
-    }
-    PipeBarrier<PIPE_ALL>();
-
-    if (tileUniqueCnt != 0) {
-        blockUniqueCnt += tileUniqueCnt;
-        if (progress != 0 && lastTileUniqueVal == sortedLocal2.GetValue(0)) {
-            blockUniqueCnt--;
-        }
-        DataCopyPad(sortedBlock1[blockUniqueCnt - tileUniqueCnt], sortedLocal2,
-            {1, static_cast<uint16_t>(sizeof(float) * tileUniqueCnt), 0, 0});
-        PipeBarrier<PIPE_ALL>();
-        lastTileUniqueVal = sortedLocal2.GetValue(tileUniqueCnt - 1);
-    }
-
-    // upload uniqueCnt.
-    if (progress == tileNum - 1) {
-        uniqueCntLocal.SetValue(0, blockUniqueCnt);
-        DataCopyPad(blockUniqueCntGlobal[GetBlockIdx()], uniqueCntLocal,
-            {1, static_cast<uint16_t>(sizeof(uint32_t) * 1), 0, 0});
-        PipeBarrier<PIPE_ALL>();
+    LocalTensor<float> tmpBuf = calcBuf[0].template Get<float>();
+    uint64_t mask[1] = {0x5555555555555555ULL};
+    for (uint32_t i = 0; i < tileNum; i++) {
+        //计算真实长度
+        int32_t remaining = (int32_t)blockRealLength - (int32_t)(i * TILE_LENGTH);
+        if (remaining <= 0) break;
+        int32_t validLen = MIN((int32_t)TILE_LENGTH, remaining);
+        // 因为muls一次只能处理256B x 255repeat 所以分两段处理
+        AscendC::DataCopyPad(tmpBuf, sortedBlock1[i * TILE_LEN_ELEM], 
+            {1, static_cast<uint32_t>(TILE_LEN_ELEM * sizeof(float)), 0, 0, 0}, {false, 0, 0, 0});
+        AscendC::PipeBarrier<PIPE_ALL>();
+        AscendC::Muls<float>(tmpBuf, tmpBuf, static_cast<float>(-1), mask, 128, {1, 1, 8, 8});
+        AscendC::Muls<float>(tmpBuf[TILE_LENGTH], tmpBuf[TILE_LENGTH], static_cast<float>(-1), mask, 128, {1, 1, 8, 8});
+        SyncDiffPipe<AscendC::HardEvent::V_MTE3>();
+        // 这里写回block需要额外注意，不要把填充的-inf（经过上面的处理已经变成+inf了）也写回去了
+        AscendC::DataCopyPad(sortedBlock1[i * TILE_LEN_ELEM], tmpBuf, 
+            {1, static_cast<uint32_t>(validLen * 2 * sizeof(float)), 0, 0, 0});
+        AscendC::PipeBarrier<PIPE_ALL>();
     }
 }
 
-template<typename T>
+
+template <typename T>
 __aicore__ inline void KernelUnique<T>::CopyOut()
 {
-    LocalTensor<T> copyLocal0 = calcBuf[0].Get<T>();
-    LocalTensor<float> copyLocal1 = calcBuf[1].Get<float>();
-    LocalTensor<int32_t> IBSyncLocal = copyLocal1.ReinterpretCast<int32_t>();
-    LocalTensor<int32_t> copyLocal2 = calcBuf[2].Get<int32_t>();
-
-    uint64_t lastAccUniqueCnt = 0;
-    // Get every blockUniqueCnt before current block. Calc accumulate uniqueCnt.
-    for (int i = 0; i < GetBlockIdx(); i++) {
-        uint64_t lastUniqueCnt = blockUniqueCntGlobal.GetValue(i);
-        lastAccUniqueCnt += lastUniqueCnt;
-        // If the first val of (i+1)th block equals to the last val of (i)th block, then they should be placed in
-        // the same position, blockUniqueCnt--.
-        if (sortedGlobal1[GetGlobalOffset(i + 1) * SORT_DATATYPE_SIZE_FACTOR].GetValue(0) ==
-            sortedGlobal1[GetGlobalOffset(i) * SORT_DATATYPE_SIZE_FACTOR].GetValue(lastUniqueCnt - 1)) {
-            lastAccUniqueCnt--;
-        }
-    }
-    uint64_t thisUniqueCnt = blockUniqueCntGlobal.GetValue(GetBlockIdx());
-
-    uint64_t restLen = thisUniqueCnt;
-    // max(Ta a, Tb b) function does not support compilation period calc.
-    constexpr uint64_t bottleneckTypeSize = sizeof(T) > sizeof(float) ? sizeof(T) : sizeof(float);
-    LocalTensor<int32_t> copyVal32 = copyLocal0.template ReinterpretCast<int32_t>();
-    LocalTensor<int32_t> uniqueVal32 = copyLocal1.ReinterpretCast<int32_t>();
-    // Copy unique values (and counts) from Workspace to dst.
-    while (restLen > 0) {
-        // DataCopyPad could copy up to 65535B in one cycle. And one tile may contain up to 65536B. So we should
-        // process multiple cycles.
-        uint64_t copyLen = min(restLen, TILE_LEN_BYTE / bottleneckTypeSize);
-        copyLen = min(copyLen, 65535 / bottleneckTypeSize);
-        if constexpr (!IsSameType<T, float>::value) {
-            DataCopyPad(copyLocal1, sortedBlock1[thisUniqueCnt - restLen],
-                {1, static_cast<uint16_t>(sizeof(float) * copyLen), 0, 0}, {false, 0, 0, 0});
-            PipeBarrier<PIPE_ALL>();
-            Muls(copyLocal1, copyLocal1, (float)-1, copyLen);
-            PipeBarrier<PIPE_V>();
-            Cast(copyLocal0, copyLocal1, RoundMode::CAST_RINT, copyLen);
-            PipeBarrier<PIPE_ALL>();
-        } else {
-            DataCopyPad(copyLocal0, sortedBlock1[thisUniqueCnt - restLen],
-                {1, static_cast<uint16_t>(sizeof(float) * copyLen), 0, 0}, {false, 0, 0, 0});
-            PipeBarrier<PIPE_ALL>();
-            Muls(copyLocal0, copyLocal0, (float)-1, copyLen);
-            PipeBarrier<PIPE_V>();
-        }
-        // DataCopyPad does not support int64_t. Copy them as uint32_t.
-        if constexpr (sizeof(T) > 4) {
-            DataCopyPad(dstGlobal1As32[(lastAccUniqueCnt + thisUniqueCnt - restLen) * sizeof(T) / sizeof(uint32_t)],
-                copyVal32, {1, static_cast<uint16_t>(sizeof(T) * copyLen), 0, 0});
-        } else {
-            DataCopyPad(dstGlobal1[lastAccUniqueCnt + thisUniqueCnt - restLen], copyLocal0,
-                {1, static_cast<uint16_t>(sizeof(T) * copyLen), 0, 0});
-        }
-        PipeBarrier<PIPE_ALL>();
-        restLen -= copyLen;
-    }
-    // Return unique count.
-    if (GetBlockIdx() == blockNum - 1) {
-        uniqueVal32.SetValue(0, lastAccUniqueCnt + thisUniqueCnt);
-        DataCopyPad(uniqueCntGlobal, uniqueVal32, {1, static_cast<uint16_t>(sizeof(uint32_t) * 1), 0, 0});
-        PipeBarrier<PIPE_ALL>();
-    }
-
+    CopyOutUnique();
     if (flagCounts) {
         CopyOutCounts();
         PipeBarrier<PIPE_ALL>();
     }
-
     if (flagInverse) {
         CopyOutInverse();
         PipeBarrier<PIPE_ALL>();
     }
 }
 
-} // namespace AscendC
+}
+
+#endif // UNIQUE_V3_H

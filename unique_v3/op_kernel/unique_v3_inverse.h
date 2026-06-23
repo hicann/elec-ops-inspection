@@ -1,26 +1,15 @@
-// Copyright 2026 Electrical Engineering SIG - CANN Community
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+#include "kernel_operator.h"
 
 using namespace AscendC;
 
-namespace AscendC 
+
+namespace NsUniqueV3
 {
 
 __aicore__ inline void ArrayCumulativeSum(
-    const LocalTensor<int32_t> &inputLocal, 
-    const LocalTensor<int32_t> &outputLocal, 
-    const LocalTensor<int32_t> &tmp, 
+    const LocalTensor<int32_t> &inputLocal,
+    const LocalTensor<int32_t> &outputLocal,
+    const LocalTensor<int32_t> &tmp,
     uint32_t length)
 {
     // 这里使用一个并行累加法求前缀和
@@ -52,7 +41,7 @@ __aicore__ inline void ArrayCumulativeSum(
             Add(outputLocal, inputLocal, tmpLocal, length);
             PipeBarrier<PIPE_V>();
             //把结果再更新回tmpLocal
-            DataCopy(tmpLocal, outputLocal, length);   
+            DataCopy(tmpLocal, outputLocal, length);
             PipeBarrier<PIPE_V>();
             continue;
         }
@@ -82,13 +71,13 @@ __aicore__ inline void KernelUnique<T>::CopyOriginalArrayIdx2GM(
     PipeBarrier<PIPE_V>();
     DataCopy(idxLocal[TILE_LENGTH], tmpLocalFloat, TILE_LENGTH);
     PipeBarrier<PIPE_V>();
-    DataCopyPad(inverseBlock1[progress * TILE_LEN_ELEM], idxLocal.ReinterpretCast<int32_t>(), {1, sizeof(uint32_t) * TILE_LEN_ELEM, 0, 0, 0});
+    DataCopyPad(inverseBlock1[progress * TILE_LEN_ELEM], idxLocal.ReinterpretCast<int32_t>(), {2, sizeof(uint32_t) * TILE_LENGTH, 0, 0, 0});
     PipeBarrier<PIPE_ALL>();
 }
 
 template<typename T>
 __aicore__ inline void KernelUnique<T>::TileCumulativeSum(
-    const LocalTensor<float> &sortedLocal1, const LocalTensor<float> &sortedLocal2, const LocalTensor<uint32_t>& tmpLocal, 
+    const LocalTensor<float> &sortedLocal1, const LocalTensor<float> &sortedLocal2, const LocalTensor<uint32_t>& tmpLocal,
     int32_t progress, int32_t &unique_num, float &firstValue, float &endValue)
 {
     uint64_t rsvdCnt = 0;
@@ -128,7 +117,7 @@ __aicore__ inline void KernelUnique<T>::TileCumulativeSum(
     PipeBarrier<PIPE_V>();
     //更新 unique_num 与 endValue
     unique_num = mask_idx.GetValue(TILE_LENGTH - 1);
-    endValue = nowEndValue;    
+    endValue = nowEndValue;
 }
 
 template<typename T>
@@ -162,7 +151,7 @@ __aicore__ inline void KernelUnique<T>::BlockCumulativeSum()
         PipeBarrier<PIPE_ALL>();
         Adds(tmpLocal1, tmpLocal1, unique, TILE_LENGTH);
         PipeBarrier<PIPE_V>();
-        DataCopyPad(inverseBlock2[tileIdx * TILE_LEN_ELEM], tmpLocal1, {1, sizeof(uint32_t) * TILE_LEN_ELEM, 0, 0, 0});
+        DataCopyPad(inverseBlock2[tileIdx * TILE_LEN_ELEM], tmpLocal1, {2, sizeof(uint32_t) * TILE_LENGTH, 0, 0, 0});
         PipeBarrier<PIPE_ALL>();
     }
 
@@ -179,10 +168,10 @@ __aicore__ inline void KernelUnique<T>::CalculateInverse()
     //首先需要计算block内的前缀和
     for (int32_t tileIdx = 0; tileIdx < this->tileNum; tileIdx++) {
         int32_t progress = tileIdx;
-        float tileFristValue = 0.0f;
-        TileCumulativeSum(sortedLocal1, sortedLocal2, tmpLocal, progress, unique_num, tileFristValue, endValue);
+        float tileFirstValue = 0.0f;
+        TileCumulativeSum(sortedLocal1, sortedLocal2, tmpLocal, progress, unique_num, tileFirstValue, endValue);
         if( tileIdx == 0 ) {
-            firstValue = tileFristValue;
+            firstValue = tileFirstValue;
         }
         //将计算好的tile内 前缀和+原始下标位置 拷贝回GM
         CopyOriginalArrayIdx2GM(sortedLocal1, sortedLocal2, tmpLocal, progress);
@@ -194,7 +183,6 @@ __aicore__ inline void KernelUnique<T>::CalculateInverse()
     DataCopyPad(inverseMsg[GetBlockIdx() * 3], sortedLocal1, {1, static_cast<uint16_t>(sizeof(float) * 3), 0, 0});
     PipeBarrier<PIPE_ALL>();
     // 同步等待其他的core计算完成，然后做整体前缀和计算
-    // TODO: 这里可以优化成 第N个core等待第N-1个core完成，用IBSet和IBWait来做，类似process函数里最后那样
     SyncAll();
     BlockCumulativeSum();
 }
@@ -234,7 +222,7 @@ __aicore__ inline void KernelUnique<T>::CopyOutInverse()
         PipeBarrier<PIPE_V>();
         CompareScalar(maskIdxLT, tmpLocal0AsFloat[TILE_LENGTH], maxIdx * 1.0f, CMPMODE::LT, TILE_LENGTH);
         PipeBarrier<PIPE_V>();
-        //将大于等于和小于的掩码再and一下得到区间掩码 
+        //将大于等于和小于的掩码再and一下得到区间掩码
         And(maskIdx, maskIdxGE.ReinterpretCast<uint16_t>(), maskIdxLT.ReinterpretCast<uint16_t>(), TILE_LENGTH / 16);
         PipeBarrier<PIPE_V>();
         GatherMask(tmpLocal1AsFloat, tmpLocal0AsFloat, maskIdx.ReinterpretCast<uint32_t>(), true, TILE_LENGTH, {1, 1, 0, 0}, rsvdCnt);
