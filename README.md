@@ -29,6 +29,14 @@
 
 ---
 
+## 开发辅助
+
+| Skill | 用途 |
+|---|---|
+| [`electric-inspection-shape-boundary`](.agents/skills/electric-inspection-shape-boundary/SKILL.md) | 从接口、Host Tiling、Kernel 和样例推导 Shape、rank、tile/block、尾块、对齐、packed 输入关系与整数范围边界，生成有公式依据的最小边界用例。 |
+
+---
+
 ## 🤝 参与贡献
 
 欢迎所有对电力 AI 和昇腾开发感兴趣的开发者参与共建！贡献方式：
