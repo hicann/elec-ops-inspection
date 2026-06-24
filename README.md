@@ -49,6 +49,8 @@
 贡献规范请参考 [`CONTRIBUTING.md`]()。
 新增或重写算子说明时，可参考 [`docs/operator-readme-template.md`](docs/operator-readme-template.md)。
 
+仓库提供了面向算子性能证据整理的辅助 Skill：[`inspection-benchmark-evidence`](.agents/skills/inspection-benchmark-evidence/SKILL.md)，用于在提交 PR 前检查巡检算子的 benchmark 环境、shape 矩阵、baseline、统计口径和可复现命令。
+
 ---
 
 ## 👥 维护团队
