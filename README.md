@@ -47,6 +47,7 @@
 4. 完善文档与示例
 
 贡献规范请参考 [`CONTRIBUTING.md`]()。
+新增或重写算子说明时，可参考 [`docs/operator-readme-template.md`](docs/operator-readme-template.md)。
 
 ---
 
