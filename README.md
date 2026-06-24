@@ -51,6 +51,8 @@
 
 仓库提供了面向算子性能证据整理的辅助 Skill：[`inspection-benchmark-evidence`](.agents/skills/inspection-benchmark-evidence/SKILL.md)，用于在提交 PR 前检查巡检算子的 benchmark 环境、shape 矩阵、baseline、统计口径和可复现命令。
 
+仓库提供了面向技能贡献的辅助 Skill：[`electric-inspection-skill-creator`](.agents/skills/electric-inspection-skill-creator/SKILL.md)，用于为电力巡检算子场景创建差异化、可验证、可提 PR 的仓库本地 Skill。
+
 ---
 
 ## 👥 维护团队
