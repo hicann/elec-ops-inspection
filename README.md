@@ -34,6 +34,12 @@
 | Skill | 用途 |
 |---|---|
 | [`electric-inspection-shape-boundary`](.agents/skills/electric-inspection-shape-boundary/SKILL.md) | 从接口、Host Tiling、Kernel 和样例推导 Shape、rank、tile/block、尾块、对齐、packed 输入关系与整数范围边界，生成有公式依据的最小边界用例。 |
+| [`electric-inspection-example-reproducibility`](.agents/skills/electric-inspection-example-reproducibility/SKILL.md) | 帮助新增或审查算子示例、README 调用片段和 PR 验证说明，检查运行命令、依赖、合成输入、参考输出、无 NPU 降级和可复现性。 |
+| [`electric-inspection-operator-catalog`](.agents/skills/electric-inspection-operator-catalog/SKILL.md) | 维护根 README 算子清单、目录链接、场景分类和发布状态。 |
+| [`electric-inspection-golden-reference`](.agents/skills/electric-inspection-golden-reference/SKILL.md) | 为算子建立可信、独立且可复现的 Golden 参考结果，设计测试向量、随机种子、精确/容差比较与不变量，并记录 loss、grad、output、inverse、counts 的验证证据。 |
+| [`electric-inspection-tiling-review`](.agents/skills/electric-inspection-tiling-review/SKILL.md) | 审查 Host Tiling、TilingData、blockDim、tiling key、任务分配和 workspace 字节布局，定位未消费字段、重复常量、单位漂移与容量待确认项。 |
+| [`electric-inspection-build-install-triage`](.agents/skills/electric-inspection-build-install-triage/SKILL.md) | 按入口、环境、CMake、编译、打包、`.run` 安装、vendor 验收和 Python 扩展阶段定位首个构建安装故障，并给出最小重跑路径。 |
+| [`electric-inspection-runtime-triage`](.agents/skills/electric-inspection-runtime-triage/SKILL.md) | 在模块已能加载后，按动态库/符号、描述符、GetWorkspaceSize、workspace、设备流、提交、同步和结果读取阶段定位 CANN/ACLNN 算子运行时故障。 |
 
 ---
 
