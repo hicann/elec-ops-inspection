@@ -46,12 +46,18 @@
 3. 参与 Electrical Engineering SIG 定期研讨会
 4. 完善文档与示例
 
-贡献规范请参考 [`CONTRIBUTING.md`]()。
+贡献规范请参考 [`CONTRIBUTING.md`](CONTRIBUTING.md)，新增算子请统一放入 [`operators/`](operators/) 目录。
 新增或重写算子说明时，可参考 [`docs/operator-readme-template.md`](docs/operator-readme-template.md)。
+设计和记录算子测试时，可使用 [`docs/operator-test-plan-template.md`](docs/operator-test-plan-template.md)。
+涉及接口、行为或安装兼容性变化时，可使用 [`docs/operator-change-note-template.md`](docs/operator-change-note-template.md)。
 
 仓库提供了面向算子性能证据整理的辅助 Skill：[`inspection-benchmark-evidence`](.agents/skills/inspection-benchmark-evidence/SKILL.md)，用于在提交 PR 前检查巡检算子的 benchmark 环境、shape 矩阵、baseline、统计口径和可复现命令。
 
 仓库提供了面向技能贡献的辅助 Skill：[`electric-inspection-skill-creator`](.agents/skills/electric-inspection-skill-creator/SKILL.md)，用于为电力巡检算子场景创建差异化、可验证、可提 PR 的仓库本地 Skill。
+
+仓库提供了面向算子贡献的辅助 Skill：[`electric-inspection-op-readiness`](.agents/skills/electric-inspection-op-readiness/SKILL.md)，用于在提交 PR 前检查电力巡检场景说明、接口约束、精度证据、性能证据和文档完整性。
+
+仓库提供了本地 Codex 知识库框架：[`electric-inspection-knowledge-base`](.agents/skills/electric-inspection-knowledge-base/SKILL.md) 与 [`.agents/knowledge`](.agents/knowledge/README.md)，用于记录公开、可审查、可渐进加载的项目上下文，不包含个人知识库内容。
 
 ---
 
