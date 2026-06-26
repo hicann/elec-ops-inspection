@@ -1,11 +1,15 @@
 #include <iostream>
 #include <vector>
+#include <cerrno>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <random>
 #include <chrono>
 #include <algorithm>
+#include <limits>
 #include <map>
+#include <string>
 #include "acl/acl.h"
 #include "aclnn_unique_v3.h"
 
@@ -428,33 +432,112 @@ int RunUniqueV3Test(
     return pass ? 0 : 1;
 }
 
-int main()
+bool ParseIntegerArgument(
+    const char* text, int64_t minValue, int64_t maxValue, int64_t& result)
 {
-    const int64_t N = 10000000;
-    const int32_t VALUE_RANGE = 10000000;
+    if (text == nullptr || *text == '\0') {
+        return false;
+    }
+
+    errno = 0;
+    char* end = nullptr;
+    const long long value = std::strtoll(text, &end, 10);
+    if (errno == ERANGE || end == text || *end != '\0' ||
+        value < minValue || value > maxValue) {
+        return false;
+    }
+    result = static_cast<int64_t>(value);
+    return true;
+}
+
+void PrintUsage(const char* program)
+{
+    LOG_PRINT(
+        "Usage: %s [element_count] [value_range] [device_id] [seed]\n"
+        "  element_count: positive integer, default 10000000\n"
+        "  value_range:   positive integer, default 10000000\n"
+        "  device_id:     non-negative integer, default 0\n"
+        "  seed:          non-negative integer, default 42\n",
+        program);
+}
+
+int main(int argc, char* argv[])
+{
+    int64_t elementCount = 10000000;
+    int32_t valueRange = 10000000;
+    int32_t deviceId = 0;
+    uint32_t seed = 42;
+
+    if (argc > 1 && (std::string(argv[1]) == "-h" || std::string(argv[1]) == "--help")) {
+        PrintUsage(argv[0]);
+        return 0;
+    }
+    if (argc > 5) {
+        PrintUsage(argv[0]);
+        return 1;
+    }
+
+    int64_t parsedValue = 0;
+    if (argc > 1 && !ParseIntegerArgument(
+            argv[1], 1, std::numeric_limits<uint32_t>::max(), elementCount)) {
+        LOG_PRINT("Invalid element_count: %s\n", argv[1]);
+        PrintUsage(argv[0]);
+        return 1;
+    }
+    if (argc > 2) {
+        if (!ParseIntegerArgument(
+                argv[2], 1, std::numeric_limits<int32_t>::max(), parsedValue)) {
+            LOG_PRINT("Invalid value_range: %s\n", argv[2]);
+            PrintUsage(argv[0]);
+            return 1;
+        }
+        valueRange = static_cast<int32_t>(parsedValue);
+    }
+    if (argc > 3) {
+        if (!ParseIntegerArgument(
+                argv[3], 0, std::numeric_limits<int32_t>::max(), parsedValue)) {
+            LOG_PRINT("Invalid device_id: %s\n", argv[3]);
+            PrintUsage(argv[0]);
+            return 1;
+        }
+        deviceId = static_cast<int32_t>(parsedValue);
+    }
+    if (argc > 4) {
+        if (!ParseIntegerArgument(
+                argv[4], 0, std::numeric_limits<uint32_t>::max(), parsedValue)) {
+            LOG_PRINT("Invalid seed: %s\n", argv[4]);
+            PrintUsage(argv[0]);
+            return 1;
+        }
+        seed = static_cast<uint32_t>(parsedValue);
+    }
 
     LOG_PRINT("========================================\n");
     LOG_PRINT("UniqueV3 Test Suite (float32, integer-valued)\n");
-    LOG_PRINT("  N = %ld, alignedN = %ld, value range = [0.0, %.0f)\n",
-              N, AlignUp(N, TILE_LENGTH), (float)VALUE_RANGE);
+    LOG_PRINT("  N = %lld, alignedN = %lld, value range = [0.0, %.0f)\n",
+              static_cast<long long>(elementCount),
+              static_cast<long long>(AlignUp(elementCount, TILE_LENGTH)),
+              static_cast<float>(valueRange));
+    LOG_PRINT("  device = %d, seed = %u\n", deviceId, seed);
     LOG_PRINT("========================================\n");
 
-    int32_t deviceId = 0;
     aclrtStream stream;
     auto ret = Init(deviceId, &stream);
     CHECK_RET(ret == ACL_SUCCESS, LOG_PRINT("Init acl failed. ERROR: %d\n", ret); return ret);
 
-    std::mt19937 rng(42);
-    std::uniform_int_distribution<int32_t> valueDist(0, VALUE_RANGE - 1);
+    std::mt19937 rng(seed);
+    std::uniform_int_distribution<int32_t> valueDist(0, valueRange - 1);
 
-    LOG_PRINT("Generating input data [%ld] (float32, integer-valued)...\n", N);
-    std::vector<float> inputHostData(N);
-    for (int64_t i = 0; i < N; i++) {
+    LOG_PRINT(
+        "Generating input data [%lld] (float32, integer-valued)...\n",
+        static_cast<long long>(elementCount));
+    std::vector<float> inputHostData(elementCount);
+    for (int64_t i = 0; i < elementCount; i++) {
         inputHostData[i] = static_cast<float>(valueDist(rng));
     }
 
     LOG_PRINT("  Input preview (first 20): ");
-    for (int64_t i = 0; i < 20 && i < N; i++) {
+    for (int64_t i = 0; i < 20 && i < elementCount; i++) {
         LOG_PRINT("%.0f ", inputHostData[i]);
     }
     LOG_PRINT("...\n");
