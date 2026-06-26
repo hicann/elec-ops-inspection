@@ -12,6 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <cstdint>
+#include <cstdlib>
+#include <iostream>
+#include <random>
+#include <vector>
+
+#include "acl/acl.h"
+#include "aclnn_optimized_transducer.h"
+
+#define CHECK_ACL(expr)                                                    \
     do {                                                                   \
         aclError ret = (expr);                                             \
         if (ret != ACL_SUCCESS) {                                          \
