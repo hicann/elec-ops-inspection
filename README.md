@@ -32,6 +32,8 @@
 
 ## 开发辅助
 
+## 开发辅助
+
 | Skill | 用途 |
 |---|---|
 | [`electric-inspection-shape-boundary`](.agents/skills/electric-inspection-shape-boundary/SKILL.md) | 从接口、Host Tiling、Kernel 和样例推导 Shape、rank、tile/block、尾块、对齐、packed 输入关系与整数范围边界，生成有公式依据的最小边界用例。 |
