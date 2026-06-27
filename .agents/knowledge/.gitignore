@@ -1,0 +1,19 @@
+# Local generated state
+*.log
+*.tmp
+*.bak
+__pycache__/
+*.py[cod]
+
+# Private or machine-local material
+.env
+.env.*
+*.pem
+*.key
+*token*
+*secret*
+*password*
+
+# Keep inbox discoverable but avoid committing scratch notes by default.
+inbox/*
+!inbox/README.md

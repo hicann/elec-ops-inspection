@@ -1,0 +1,50 @@
+version: 1
+root: .
+
+usage:
+  purpose: Repo-local Codex knowledge scaffold for cann/elec-ops-inspection.
+  startup_rule: Read this registry first, then load only matching bootstrap docs.
+  path_rule: Paths are relative to .agents/knowledge unless otherwise stated.
+  avoid: Do not bulk-read the knowledge base or import personal knowledge content.
+  precedence:
+    - System/developer instructions
+    - Current user request
+    - Repository AGENTS.md, README files, source code, and tests
+    - This repo-local knowledge base
+
+domains:
+  operator-documentation:
+    title: Operator documentation and evidence review
+    kb: domains/operator-documentation
+    bootstrap:
+      - overview.md
+      - bootstrap.md
+      - evidence-rules.md
+
+projects:
+  elec-ops-inspection:
+    title: elec-ops-inspection repository context
+    kind: operator-documentation
+    workspace: ../..
+    kb: projects/elec-ops-inspection
+    bootstrap:
+      - project-summary.md
+      - current-status.md
+      - entrypoints.md
+    related_domains:
+      - operator-documentation
+
+learning:
+  index:
+    title: Learning topic index
+    kb: learning
+    bootstrap:
+      - README.md
+
+conventions:
+  status_file: current-status.md
+  decision_file: decisions.md
+  decision_load_strategy: on_demand_unless_listed_in_bootstrap
+  entrypoint_file: entrypoints.md
+  project_summary_file: project-summary.md
+  date_format: YYYY-MM-DD
