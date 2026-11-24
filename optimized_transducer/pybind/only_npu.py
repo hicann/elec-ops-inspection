@@ -13,7 +13,6 @@
 # limitations under the License.
 
 import torch
-import torchaudio
 import torch_npu
 import time
 import warnings
