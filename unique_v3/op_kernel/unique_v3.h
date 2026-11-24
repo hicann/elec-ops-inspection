@@ -67,7 +67,8 @@ private:
     __aicore__ inline static bool TileCalculateCounts(const LocalTensor<float>& dstVal,
         const LocalTensor<float>& srcLocal, const LocalTensor<float>& shiftedLocal,
         const LocalTensor<uint32_t>& bitMask32, const uint16_t elemLength,
-        uint64_t& arrayLen,int32_t& beforeNumCnt, float& beforeNumValue);
+        uint64_t& arrayLen, int32_t& beforeNumCnt, float& beforeNumValue,
+        const bool isFirstTile);
     __aicore__ inline static void ConsecutiveUnique(const LocalTensor<float>& dstVal,
         const LocalTensor<float>& srcLocal, const LocalTensor<float>& shiftedLocal,
         const LocalTensor<uint32_t>& bitMask16, const uint16_t elemLength, uint64_t& tileUniqueCnt);

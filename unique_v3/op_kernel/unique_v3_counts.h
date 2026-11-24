@@ -9,14 +9,15 @@ namespace NsUniqueV3
 template<typename T>
 __aicore__ inline bool KernelUnique<T>::TileCalculateCounts(const LocalTensor<float>& dstVal,
     const LocalTensor<float>& srcLocal, const LocalTensor<float>& shiftedLocal, const LocalTensor<uint32_t>& bitMask32,
-    const uint16_t elemLength, uint64_t& arrayLen, int32_t& beforeNumCnt, float& beforeNumValue)
+    const uint16_t elemLength, uint64_t& arrayLen, int32_t& beforeNumCnt, float& beforeNumValue,
+    const bool isFirstTile)
 {
     bool isSame = false;
     LocalTensor<uint32_t> bitMask_idx =  bitMask32[TILE_LENGTH / 2].ReinterpretCast<uint32_t>();
     uint64_t rsvdCnt = 0;
     GatherMask(dstVal, srcLocal, 1, false, 0, {1, static_cast<uint16_t>((elemLength * 2 + 63) / 64), 8, 0}, rsvdCnt);
     PipeBarrier<PIPE_V>();
-    isSame = dstVal.GetValue(0) == beforeNumValue;
+    isSame = !isFirstTile && (dstVal.GetValue(0) == beforeNumValue);
     Duplicate(bitMask32, (uint32_t)0b11111111111111111111111111111111, (elemLength + 31) / 32);
     PipeBarrier<PIPE_V>();
     bitMask32.SetValue(0, 0b11111111111111111111111111111110);
@@ -78,7 +79,7 @@ __aicore__ inline void KernelUnique<T>::CalculateCounts()
         bool shifted = TileCalculateCounts(
             sortedLocal2, sortedLocal1, shiftedLocal, 
             bitMask32, TILE_LENGTH, arrayLen, 
-            beforeNumCnt, beforeNumValue);
+            beforeNumCnt, beforeNumValue, tileIdx == 0);
         // 把结果写回counterGlobal
         DataCopyPad(counterGlobal[offset - (shifted ? 1 : 0)], sortedLocal1.ReinterpretCast<int32_t>(),
             {1, static_cast<uint16_t>(sizeof(uint32_t) * arrayLen), 0, 0});
